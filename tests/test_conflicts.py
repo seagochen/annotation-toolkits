@@ -34,6 +34,29 @@ def test_transitive_chain_against_a_negative_names_its_witnesses(dataset):
     assert conflicts[0].witnesses == ["base:covisible", "c1", "c2", "c3"]
 
 
+def test_transitive_negatives_in_one_same_component_are_grouped(dataset):
+    write_csv(dataset / "pairs.csv", PAIR_FIELDS,
+              [pair("a", "c", 0, evidence="negative_ac"),
+               pair("a", "d", 0, evidence="negative_ad")])
+    write_csv(dataset / "review.csv", CANDIDATE_FIELDS,
+              [candidate("c1", "a", "b", "same"),
+               candidate("c2", "b", "c", "same"),
+               candidate("c3", "c", "d", "same")])
+
+    conflicts = [item for item in detect(view(dataset))
+                 if item.kind == "transitive_negative"]
+
+    assert len(conflicts) == 1
+    conflict = conflicts[0]
+    assert conflict.detail["negative_constraints"] == 2
+    assert [item["endpoints"] for item in conflict.detail["same_paths"]] == [
+        ["a", "c"], ["a", "d"]]
+    assert [item["path"] for item in conflict.detail["same_paths"]] == [
+        ["a", "b", "c"], ["a", "b", "c", "d"]]
+    assert conflict.identities == ["a", "b", "c", "d"]
+    assert conflict.witnesses == ["base:negative_ac", "base:negative_ad", "c1", "c2", "c3"]
+
+
 def test_covisible_tracks_may_not_be_merged(dataset):
     write_csv(dataset / "covisibility.csv", COVISIBLE_FIELDS,
               [{"person_id1": "a", "person_id2": "b", "video": "v0.mp4", "split": "train",

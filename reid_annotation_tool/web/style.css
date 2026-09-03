@@ -154,6 +154,37 @@ aside {
 .conflict .hint { color: var(--accent); font-size: 12px; margin-top: 8px; }
 .detail-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .detail-title { margin: 0 0 12px; font-size: 15px; }
+.relation-graph {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px; margin-bottom: 14px;
+}
+.graph-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.graph-legend { font-family: ui-monospace, monospace; font-size: 12px; }
+.graph-legend.same { color: var(--same); }
+.graph-legend.different { color: var(--different); }
+.relation-graph > p { color: var(--muted); font-size: 12px; margin: 6px 0 10px; }
+.graph-scroll {
+  overflow: auto; max-height: 560px; background: #0b0d11;
+  border: 1px solid var(--line); border-radius: 6px;
+}
+.graph-scroll svg { display: block; min-width: 100%; }
+.graph-same-edge { stroke: var(--same); stroke-width: 3; opacity: .8; }
+.graph-different-edge {
+  fill: none; stroke: var(--different); stroke-width: 3; stroke-dasharray: 9 7;
+  opacity: .9; pointer-events: none;
+}
+.graph-edge-hit { stroke: transparent; stroke-width: 18; cursor: pointer; }
+.graph-edge-hit:focus { stroke: rgba(79, 195, 107, .22); outline: none; }
+.graph-node rect { fill: #11151c; stroke: var(--node-color); stroke-width: 2; }
+.graph-node text {
+  fill: var(--text); font-family: ui-monospace, monospace; font-size: 11px;
+  pointer-events: none;
+}
+.edge-card.graph-target { animation: graph-target 1.6s ease-out; }
+@keyframes graph-target {
+  0%, 35% { border-color: var(--same); box-shadow: 0 0 0 3px rgba(79, 195, 107, .3); }
+  100% { border-color: var(--line); box-shadow: none; }
+}
 .id-chip {
   font-family: ui-monospace, monospace; font-size: 12px; padding: 2px 9px;
   border: 1.5px solid var(--line); border-radius: 999px; background: #0d0f13;

@@ -367,19 +367,29 @@ class Provenance:
         unrelated relations.
         """
         detail = conflict.get("detail") or {}
-        path = list(detail.get("same_path") or [])
-        if not path and conflict.get("kind") == "direct_contradiction":
-            path = list(conflict.get("identities") or [])
-        if len(path) < 2:
+        paths = [list(item.get("path") or []) for item in detail.get("same_paths", [])]
+        if not paths:
+            path = list(detail.get("same_path") or [])
+            if not path and conflict.get("kind") == "direct_contradiction":
+                path = list(conflict.get("identities") or [])
+            paths = [path] if path else []
+        paths = [path for path in paths if len(path) >= 2]
+        if not paths:
             return None
+        path = list(dict.fromkeys(identity for one_path in paths for identity in one_path))
         edges = []
-        for left, right in zip(path, path[1:]):
-            key = relation(left, right)
-            answers = self.pair_answers(key, context)
-            base_rows = context["base_by_pair"].get(key, [])
-            edges.append({"left": left, "right": right, "base_rows": base_rows,
-                          "answers": answers,
-                          "decision": edge_decision(answers, base_rows)})
+        seen_edges = set()
+        for one_path in paths:
+            for left, right in zip(one_path, one_path[1:]):
+                key = relation(left, right)
+                if key in seen_edges:
+                    continue
+                seen_edges.add(key)
+                answers = self.pair_answers(key, context)
+                base_rows = context["base_by_pair"].get(key, [])
+                edges.append({"left": left, "right": right, "base_rows": base_rows,
+                              "answers": answers,
+                              "decision": edge_decision(answers, base_rows)})
         weakest, metric_status, metric_key = weakest_edge_index(edges)
         if metric_key:
             # the key may be a content hash; surface the recorded path for display
@@ -388,9 +398,23 @@ class Provenance:
                  for answer in edge["answers"]
                  if answer.get("model_or_source") == metric_key["model"]), "")
 
-        # The contradiction banner merges every physical evidence source that
-        # exists for the two chain ends, regardless of which check fired.
-        left, right = path[0], path[-1]
+        endpoint_pairs = [list(item.get("endpoints") or [one_path[0], one_path[-1]])
+                          for item, one_path in zip(detail.get("same_paths", []), paths)]
+        if not endpoint_pairs:
+            endpoint_pairs = [[paths[0][0], paths[0][-1]]]
+        contradictions = [self._endpoint_contradiction(left, right, context)
+                          for left, right in endpoint_pairs]
+        return {
+            "path": path, "endpoints": endpoint_pairs[0],
+            "endpoint_pairs": endpoint_pairs, "edges": edges,
+            "group_key": ">".join(sorted(path)),
+            "metric_status": metric_status, "metric_key": metric_key,
+            "weakest_index": weakest,
+            "contradiction": contradictions[0], "contradictions": contradictions,
+        }
+
+    def _endpoint_contradiction(self, left: str, right: str, context: dict) -> dict:
+        """Merge all evidence saying one pair of chain endpoints differs."""
         key = relation(left, right)
         endpoint_base = context["base_by_pair"].get(key, [])
         endpoint_answers = self.pair_answers(key, context)
@@ -411,18 +435,14 @@ class Provenance:
                       "frames": int(covisible_row.get("frames", 0) or 0)}
                      if covisible_row else None)
         return {
-            "path": path, "endpoints": [left, right], "edges": edges,
-            "metric_status": metric_status, "metric_key": metric_key,
-            "weakest_index": weakest,
-            "contradiction": {
-                "negative_rows": negatives[:50],
-                "negative_row_count": len(negatives),
-                "different_answers": different_answers,
-                "temporal": temporal, "covisible": covisible,
-                # the two ends are a relation too, and judging it is often the
-                # honest fix: the chain is right and one endpoint answer was wrong
-                "decision": edge_decision(endpoint_answers, endpoint_base),
-            },
+            "endpoints": [left, right],
+            "negative_rows": negatives[:50],
+            "negative_row_count": len(negatives),
+            "different_answers": different_answers,
+            "temporal": temporal, "covisible": covisible,
+            # The endpoints are a relation too: sometimes the chain is right
+            # and the negative answer is the judgement that needs changing.
+            "decision": edge_decision(endpoint_answers, endpoint_base),
         }
 
     def _witness_chain(self, conflict: dict, context: dict) -> list[dict]:

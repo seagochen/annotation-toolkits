@@ -332,7 +332,8 @@ function sampleEven(values, maximum) {
 // conflict is open: after a verdict the report is recomputed and the SAME
 // chain re-rendered from the fresh data, instead of dumping the reviewer back
 // at the top of the list halfway through a 12-edge review.
-const conflictKey = (item) => [item.kind, ((item.conflict_detail
+const conflictKey = (item) => [item.kind, (item.conflict_detail
+  && item.conflict_detail.group_key) || ((item.conflict_detail
   && item.conflict_detail.endpoints) || item.identities || []).join(">")].join("|");
 
 async function fetchConflicts(refresh) {
@@ -373,9 +374,13 @@ async function refreshOpenConflict() {
 // actionable (crops, provenance, verdict buttons) lives on the detail page, so
 // a card click cannot collide with inner button clicks.
 function renderConflict(item) {
-  const chain = item.detail && item.detail.same_path
-    ? el("div", { class: "chain", text: `同一链：${item.detail.same_path.join(" → ")}` })
-    : null;
+  const paths = (item.detail && item.detail.same_paths) || [];
+  const chain = paths.length > 1
+    ? el("div", { class: "chain", text: `同一冲突链：${paths.length} 条 different 矛盾 · `
+      + `${item.identities.length} 个相关身份（重复 same 边已合并）` })
+    : item.detail && item.detail.same_path
+      ? el("div", { class: "chain", text: `同一链：${item.detail.same_path.join(" → ")}` })
+      : null;
   const detail = item.conflict_detail;
   if (!detail) {
     // No chain semantics (e.g. split_leakage): flat witness summary, not clickable.
@@ -543,6 +548,121 @@ function describeEvent(event) {
   return parts.join(" · ");
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attributes = {}) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+  return node;
+}
+
+// A compact causal overview before the evidence cards. Solid edges are the
+// assumptions that merge tracks; dashed red edges are the constraints those
+// assumptions violate. The layered BFS layout keeps a long chain readable and
+// still handles branches without requiring a graph library.
+function relationGraph(detail, colors) {
+  const nodes = detail.path || [];
+  if (nodes.length < 2) return null;
+  const endpointPairs = detail.endpoint_pairs || [detail.endpoints];
+  const adjacency = new Map(nodes.map((identity) => [identity, []]));
+  detail.edges.forEach((edge, index) => {
+    adjacency.get(edge.left).push([edge.right, index]);
+    adjacency.get(edge.right).push([edge.left, index]);
+  });
+  const root = endpointPairs[0][0];
+  const level = new Map([[root, 0]]);
+  const queue = [root];
+  while (queue.length) {
+    const current = queue.shift();
+    for (const [next] of adjacency.get(current) || []) {
+      if (!level.has(next)) {
+        level.set(next, level.get(current) + 1);
+        queue.push(next);
+      }
+    }
+  }
+  let lastLevel = Math.max(0, ...level.values());
+  for (const identity of nodes) if (!level.has(identity)) level.set(identity, ++lastLevel);
+  const columns = new Map();
+  for (const identity of nodes) {
+    const value = level.get(identity);
+    if (!columns.has(value)) columns.set(value, []);
+    columns.get(value).push(identity);
+  }
+  const maxRows = Math.max(...[...columns.values()].map((values) => values.length));
+  const nodeWidth = 250, nodeHeight = 42, xGap = 305, yGap = 82, padding = 34;
+  const width = Math.max(620, (lastLevel + 1) * xGap + padding * 2);
+  const height = Math.max(150, maxRows * yGap + padding * 2);
+  const positions = new Map();
+  for (const [column, identities] of columns) {
+    identities.forEach((identity, row) => positions.set(identity, {
+      x: padding + column * xGap,
+      y: padding + (row + (maxRows - identities.length) / 2) * yGap,
+    }));
+  }
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, width, height,
+    role: "img", "aria-label": "same 关系与 different 矛盾图" });
+  const title = svgEl("title");
+  title.textContent = "实线表示 same，红色虚线表示 proven different";
+  svg.append(title);
+  for (const [index, edge] of detail.edges.entries()) {
+    const first = positions.get(edge.left), second = positions.get(edge.right);
+    const line = svgEl("line", { x1: first.x + nodeWidth / 2, y1: first.y + nodeHeight / 2,
+      x2: second.x + nodeWidth / 2, y2: second.y + nodeHeight / 2,
+      class: "graph-same-edge" });
+    const hit = svgEl("line", { x1: first.x + nodeWidth / 2, y1: first.y + nodeHeight / 2,
+      x2: second.x + nodeWidth / 2, y2: second.y + nodeHeight / 2,
+      class: "graph-edge-hit", tabindex: "0", role: "button",
+      "aria-label": `${edge.left} 与 ${edge.right} 的 same 边；点击查看证据` });
+    const jump = () => {
+      const card = document.getElementById(`conflict-edge-${index}`);
+      if (!card) return;
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      card.classList.add("graph-target");
+      setTimeout(() => card.classList.remove("graph-target"), 1600);
+    };
+    hit.addEventListener("click", jump);
+    hit.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); jump(); }
+    });
+    svg.append(line, hit);
+  }
+  for (const [index, pair] of endpointPairs.entries()) {
+    const first = positions.get(pair[0]), second = positions.get(pair[1]);
+    if (!first || !second) continue;
+    const x1 = first.x + nodeWidth / 2, y1 = first.y + nodeHeight / 2;
+    const x2 = second.x + nodeWidth / 2, y2 = second.y + nodeHeight / 2;
+    const bend = 28 + (index % 4) * 13;
+    const path = svgEl("path", {
+      d: `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${Math.min(y1, y2) - bend} ${x2} ${y2}`,
+      class: "graph-different-edge",
+    });
+    svg.append(path);
+  }
+  for (const identity of nodes) {
+    const position = positions.get(identity);
+    const group = svgEl("g", { class: "graph-node" });
+    const rect = svgEl("rect", { x: position.x, y: position.y,
+      width: nodeWidth, height: nodeHeight, rx: 9,
+      style: `--node-color:${colors.get(identity) || "#8992a3"}` });
+    const text = svgEl("text", { x: position.x + 12, y: position.y + 26 });
+    text.textContent = identity;
+    const exact = svgEl("title");
+    exact.textContent = identity;
+    group.append(rect, text, exact);
+    svg.append(group);
+  }
+  return el("section", { class: "relation-graph" }, [
+    el("div", { class: "graph-head" }, [
+      el("b", { text: "关系因果图" }),
+      el("span", { class: "graph-legend same", text: "━ same（点击线段跳到复核）" }),
+      el("span", { class: "graph-legend different", text: "┄ proven different" }),
+    ]),
+    el("p", { text: "沿实线可从任一红色虚线的一端走到另一端，就是本组冲突的因果链。" }),
+    el("div", { class: "graph-scroll" }, [svg]),
+  ]);
+}
+
 function edgeCard(edge, index, detail, colors, endpoints) {
   const weakest = detail.metric_status === "sortable" && detail.weakest_index === index;
   const decision = edge.decision;
@@ -576,15 +696,17 @@ function edgeCard(edge, index, detail, colors, endpoints) {
   if (!edge.base_rows.length && !edge.answers.length) {
     provenance.append(el("div", { class: "prov", text: "未找到该边的任何出处记录。" }));
   }
-  return el("div", { class: `edge-card ${weakest ? "weakest" : ""}` },
+  return el("div", { id: `conflict-edge-${index}`,
+    class: `edge-card ${weakest ? "weakest" : ""}` },
     [head, sides, decisionBar(edge.left, edge.right, decision, "这两条轨迹是："), provenance]);
 }
 
 // Merge every physical evidence source known for the two chain ends, whatever
 // check produced the conflict: overlap seconds, covisible frames, negative
 // manifest rows and human "different" verdicts all say the same thing.
-function contradictionBanner(detail, colors, endpoints) {
-  const c = detail.contradiction || {};
+function contradictionBanner(detail, contradiction, colors, endpoints, index, total) {
+  const c = contradiction || {};
+  const pair = c.endpoints || detail.endpoints;
   const facts = [];
   if (c.temporal) {
     facts.push(`两端轨迹在 ${c.temporal.video} 中同时出现，时间重叠 ${c.temporal.overlap_sec}s —— 同一个人不可能同时是两条轨迹`);
@@ -608,14 +730,15 @@ function contradictionBanner(detail, colors, endpoints) {
   return el("div", { class: "contradiction" }, [
     el("h3", {}, [
       document.createTextNode("⚠ 矛盾端点："),
-      chipFor(detail.endpoints[0], colors, endpoints),
+      chipFor(pair[0], colors, endpoints),
       document.createTextNode(" ↔ "),
-      chipFor(detail.endpoints[1], colors, endpoints),
+      chipFor(pair[1], colors, endpoints),
+      total > 1 ? document.createTextNode(`　(${index + 1}/${total})`) : null,
     ]),
     el("ul", {}, facts.map((fact) => el("li", { text: fact }))),
     el("p", { class: "verdict-line",
       text: `以上证据证明两端不同，而下方 ${detail.edges.length} 条 same 边把它们连成了同一身份 —— 至少有一条 same 边是错的。同色 chip = 同一条轨迹，可据此追踪 A=B、B=C…的传递路径。` }),
-    decisionBar(detail.endpoints[0], detail.endpoints[1], c.decision, "这两个端点是："),
+    decisionBar(pair[0], pair[1], c.decision, "这两个端点是："),
   ]);
 }
 
@@ -627,7 +750,9 @@ function showConflictDetail(item, keepScroll = false) {
   const scroll = panel.scrollTop;
   const colors = new Map(detail.path.map((identity, index) =>
     [identity, PALETTE[index % PALETTE.length]]));
-  const endpoints = new Set(detail.endpoints);
+  const endpointPairs = detail.endpoint_pairs || [detail.endpoints];
+  const endpoints = new Set(endpointPairs.flat());
+  const contradictions = detail.contradictions || [detail.contradiction];
   let metricNote = METRIC_NOTES[detail.metric_status] || "";
   if (detail.metric_status === "sortable" && detail.metric_key) {
     const key = detail.metric_key;
@@ -643,7 +768,10 @@ function showConflictDetail(item, keepScroll = false) {
       el("span", { class: "kind", text: `${item.kind} · ${item.severity}` }),
     ]),
     el("h3", { class: "detail-title", text: item.message }),
-    contradictionBanner(detail, colors, endpoints),
+    relationGraph(detail, colors),
+    ...contradictions.map((contradiction, index) =>
+      contradictionBanner(detail, contradiction, colors, endpoints,
+        index, contradictions.length)),
     metricNote ? el("p", { class: "metric-note", text: metricNote }) : null,
     ...detail.edges.map((edge, index) => edgeCard(edge, index, detail, colors, endpoints)),
   ];

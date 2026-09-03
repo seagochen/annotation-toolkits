@@ -175,18 +175,74 @@ def cluster_witnesses(adjacency: dict[str, list[tuple[str, str]]],
 
 
 def check_transitive(view: DatasetView) -> list[Conflict]:
-    conflicts = []
+    # One impossible merged identity can violate dozens of negative relations.
+    # Reporting every relation as a separate conflict made the reviewer reopen
+    # the same prefix of same-edges over and over. Group intersecting negative
+    # paths while retaining every endpoint pair and its shortest explanation.
+    candidates = []
     for (left, right), sources in sorted(view.negative_edges.items()):
         if left == right or not view.graph.same(left, right):
             continue
         found = shortest_same_path(view.adjacency, left, right)
         path, witnesses = found if found else ([left, right], [])
+        candidates.append({
+            "endpoints": [left, right], "path": path,
+            "same_witnesses": witnesses, "different_witnesses": sources,
+        })
+
+    # A positive component can be very large and contain two unrelated bad
+    # merges. Only coalesce constraints whose explanatory paths touch (with
+    # transitive closure), which is the review surface they genuinely share.
+    parents = list(range(len(candidates)))
+
+    def find(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(first: int, second: int) -> None:
+        first, second = find(first), find(second)
+        if first != second:
+            parents[second] = first
+
+    owner: dict[str, int] = {}
+    for index, candidate in enumerate(candidates):
+        for identity in candidate["path"]:
+            if identity in owner:
+                union(index, owner[identity])
+            else:
+                owner[identity] = index
+    grouped: defaultdict[int, list[dict]] = defaultdict(list)
+    for index, candidate in enumerate(candidates):
+        grouped[find(index)].append(candidate)
+
+    conflicts = []
+    for constraints in grouped.values():
+        identities = list(dict.fromkeys(
+            identity for constraint in constraints for identity in constraint["path"]))
+        witnesses = sorted({witness for constraint in constraints
+                            for witness in (constraint["same_witnesses"]
+                                            + constraint["different_witnesses"])})
+        first = constraints[0]
+        if len(constraints) == 1:
+            left, right = first["endpoints"]
+            message = f"{left} and {right} are proven different but a same-chain merges them"
+        else:
+            message = (f"one connected same-chain merges {len(constraints)} proven-different "
+                       f"pairs across {len(identities)} identities")
+        detail = {
+            "same_paths": constraints,
+            "negative_constraints": len(constraints),
+        }
+        # Preserve the original JSON shape for single-pair consumers.
+        if len(constraints) == 1:
+            detail.update({"same_path": first["path"],
+                           "same_witnesses": first["same_witnesses"],
+                           "different_witnesses": first["different_witnesses"]})
         conflicts.append(Conflict(
             "transitive_negative", "error",
-            f"{left} and {right} are proven different but a same-chain merges them",
-            identities=path, witnesses=sorted(set(witnesses + sources)),
-            detail={"same_path": path, "same_witnesses": witnesses,
-                    "different_witnesses": sources}))
+            message, identities=identities, witnesses=witnesses, detail=detail))
     return conflicts
 
 

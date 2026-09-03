@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-from reid_annotation_tool.core import PAIR_FIELDS
+from reid_annotation_tool.core import PAIR_FIELDS, read_csv
 from reid_annotation_tool.provenance import (candidate_metric, edge_decision,
                                              weakest_edge_index)
 from reid_annotation_tool.server import Store
@@ -143,6 +143,23 @@ def test_edges_follow_same_path_order(chain_dataset):
         == list(zip(path, path[1:]))
     assert detail["endpoints"] == [path[0], path[-1]]
     assert detail["path"] == path
+
+
+def test_grouped_transitive_paths_share_one_deduplicated_detail(chain_dataset):
+    root, current, _ = chain_dataset
+    rows = read_csv(root / "pairs.csv")
+    rows.append(chain_pair("n00", "n10", 0, "second_proven_negative"))
+    write_csv(root / "pairs.csv", PAIR_FIELDS_WITH_BATCH, rows)
+
+    conflict = transitive_conflict(make_store(chain_dataset).conflict_report())
+    detail = conflict["conflict_detail"]
+
+    assert conflict["detail"]["negative_constraints"] == 2
+    assert detail["endpoint_pairs"] == [["n00", "n10"], ["n00", "n12"]]
+    assert len(detail["contradictions"]) == 2
+    assert len(detail["edges"]) == 12
+    assert len({tuple(sorted((edge["left"], edge["right"])))
+                for edge in detail["edges"]}) == 12
 
 
 def test_shared_evidence_base_edges_stay_distinct(chain_dataset):
