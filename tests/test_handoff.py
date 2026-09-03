@@ -3,21 +3,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from reid_annotation_tool.train import (build_config, latest_run, train,
-                                        validate_pairs)
+from reid_annotation_tool.handoff import (build_config, latest_run, pair_provenance,
+                                          train, validate_pairs)
 
 from conftest import CANDIDATE_FIELDS, candidate, pair, write_csv
 from reid_annotation_tool.core import PAIR_FIELDS
 
 
 def options(**overrides):
+    """The whole `train:` section: the handoff, and nothing about a model."""
     values = dict(
         pairs="pairs.csv", review=[], trainer=Path("trainer"), python="python",
-        name="exp", base_config=None, backbone="osnet_x0_25", pretrained_path="",
-        no_pretrained=False, tasks="reid", objective="id_triplet", reid_dim=512,
-        num_classes=4, img_size=224, reid_epochs=10, cls_epochs=0, reid_lr=1e-4,
-        cls_lr=1e-4, backbone_lr=1e-5, batch_size=32, workers=4, patience=15,
-        data_cls="", csv_cls="labels.csv", device="", seed=0, set=[], export=False,
+        name="exp", tasks="reid", base_config=None, set=[], export=False,
         allow_conflicts=False, dry_run=True)
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -73,18 +70,26 @@ def test_missing_columns_are_reported(tmp_path):
         validate_pairs(tmp_path / "bad.csv", "reid")
 
 
-def test_config_points_the_trainer_at_the_reviewed_dataset(tmp_path):
+def test_unresolved_labels_are_rejected(tmp_path):
+    path = tmp_path / "pairs.csv"
+    write_csv(path, PAIR_FIELDS, [pair("a", "b", "")])
+    with pytest.raises(SystemExit, match="unresolved/invalid"):
+        validate_pairs(path, "reid")
+
+
+def test_pair_provenance_counts_human_evidence(tmp_path):
+    path = tmp_path / "pairs.csv"
+    write_csv(path, PAIR_FIELDS, [pair("a", "b", 0, evidence="reviewed_model_mined_different"),
+                                  pair("c", "d", 0, evidence="covisible_tracks_cross_crops")])
+    report = pair_provenance(path)
+    assert report["rows"] == 2 and report["human_reviewed"] == 1
+
+
+def test_config_is_only_the_interface(tmp_path):
+    """Four keys, and not one opinion about somebody else's model."""
     config = build_config(tmp_path, options(), tmp_path / "runs")
-    assert config["data"] == {"cls_root": "", "cls_csv": "labels.csv",
-                              "reid_root": str(tmp_path), "reid_csv": "pairs.csv"}
-    assert config["model"]["backbone"] == "osnet_x0_25"
-    assert config["train"]["identities_per_batch"] == 8
-    assert config["output"]["project"] == str(tmp_path / "runs")
-
-
-def test_contrastive_objective_skips_pk_sampler_defaults(tmp_path):
-    config = build_config(tmp_path, options(objective="contrastive"), tmp_path / "runs")
-    assert "identities_per_batch" not in config["train"]
+    assert config == {"data": {"reid_root": str(tmp_path), "reid_csv": "pairs.csv"},
+                      "output": {"project": str(tmp_path / "runs"), "name": "exp"}}
 
 
 def test_set_overrides_any_trainer_value(tmp_path):
@@ -95,12 +100,32 @@ def test_set_overrides_any_trainer_value(tmp_path):
         build_config(tmp_path, options(set=["nonsense"]), tmp_path / "runs")
 
 
-def test_base_config_is_extended_not_replaced(tmp_path):
+def test_set_cannot_repoint_the_trainer_at_another_dataset(tmp_path):
+    """The provenance chain is worthless if an override can silently break it."""
+    for override in ("data.reid_root=/elsewhere", "data.reid_csv=pairs.csv",
+                     "output.project=/elsewhere", "output.name=other"):
+        with pytest.raises(SystemExit, match="cannot be overridden"):
+            build_config(tmp_path, options(set=[override]), tmp_path / "runs")
+
+
+def test_base_config_must_be_a_mapping(tmp_path):
+    (tmp_path / "base.yaml").write_text("- not\n- a mapping\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="must be a YAML mapping"):
+        build_config(tmp_path, options(base_config=tmp_path / "base.yaml"),
+                     tmp_path / "runs")
+
+
+def test_base_config_is_passed_through_untouched(tmp_path):
+    """The trainer's own hyperparameters survive verbatim; only paths are added."""
     (tmp_path / "base.yaml").write_text(
-        "train:\n  triplet_margin: 0.9\nadvanced:\n  ema: true\n", encoding="utf-8")
+        "model:\n  backbone: osnet_x0_25\ntrain:\n  reid_lr: 0.0001\n"
+        "  triplet_margin: 0.9\nadvanced:\n  ema: true\n", encoding="utf-8")
     config = build_config(tmp_path, options(base_config=tmp_path / "base.yaml"),
                           tmp_path / "runs")
-    assert config["train"]["triplet_margin"] == 0.9 and config["advanced"]["ema"] is True
+    assert config["model"] == {"backbone": "osnet_x0_25"}
+    assert config["train"] == {"reid_lr": 0.0001, "triplet_margin": 0.9}
+    assert config["advanced"] == {"ema": True}
+    assert config["data"]["reid_csv"] == "pairs.csv"
 
 
 def test_latest_run_finds_the_incremented_directory(tmp_path):
