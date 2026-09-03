@@ -79,6 +79,18 @@ def test_a_typo_is_refused_rather_than_ignored(tmp_path):
         project_config.load(write(tmp_path, "pipeline:\n  script: x\n"))
 
 
+def test_a_retired_key_says_where_it_went(tmp_path):
+    """A removed key must not read like a typo: the reader needs the migration."""
+    with pytest.raises(ConfigError, match="belong to your trainer"):
+        project_config.load(write(tmp_path, MINIMAL + "train:\n  backbone: osnet_x0_25\n"))
+    project = project_config.load(write(tmp_path))
+    with pytest.raises(ConfigError, match="belong to your trainer"):
+        project_config.apply_override(project.sections, "train.reid_lr=0.001")
+    # A genuine typo in the same section still reads as a typo.
+    with pytest.raises(ConfigError, match="unknown `train` keys"):
+        project_config.load(write(tmp_path, MINIMAL + "train:\n  trainerr: ./t\n"))
+
+
 def test_the_pipeline_must_be_named_because_the_tool_does_not_track(tmp_path):
     project = project_config.load(write(tmp_path, "dataset: ./ds\n"))
     with pytest.raises(ConfigError, match="does not"):

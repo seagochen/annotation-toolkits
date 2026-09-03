@@ -13,7 +13,7 @@ and derived from there, and tuning lives in named sections of ``reid.yaml``
     python app.py mine           # 挖掘下一轮审核候选
     python app.py check          # 逻辑冲突检测
     python app.py finalize       # 把已审核结论烤进新的 pairs 清单
-    python app.py train          # 桥接外部训练器
+    python app.py train          # 把数据集交给外部训练器（本工具不训练模型）
 
 Anything in the file can still be overridden for one run with
 ``--set section.key=value``.
@@ -240,7 +240,7 @@ def latest_pairs(project: Project) -> str:
 
 
 def stage_train(project: Project, args) -> int:
-    from .train import train
+    from .handoff import train
 
     values = project.stage("train")
     values.pairs = values.pairs or latest_pairs(project)

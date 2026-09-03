@@ -107,9 +107,15 @@ train:
   trainer: /home/cxt/projects/mobilenet-yolopose-plugin-pytorch
   python: /home/cxt/miniconda3/envs/aigc/bin/python
   name: scene_reviewed_v1
-  backbone: osnet_x0_25
-  pretrained_path: /home/cxt/projects/mobilenet-yolopose-plugin-pytorch/weights/pretrained/osnet_x0_25_msmt17.pth
-  objective: id_triplet
-  reid_epochs: 300
   export: true
   # pairs 留空则自动取最新的 pairs.reviewed-*.csv
+  #
+  # 模型和优化的超参不属于本节 —— backbone / lr / epochs 是训练器的事，不是数据集
+  # 的属性。它们写在你训练器自己的 YAML 里，本工具照抄并只补上四个键（数据集根目录、
+  # 配对清单、输出目录、run 名）：
+  base_config: ./my-trainer-reid.yaml
+  # 单次覆盖你训练器配置里的任意字段（节.键=值），本工具不校验这些键：
+  set:
+    - model.backbone=osnet_x0_25
+    - train.reid_epochs=300
+    - advanced.device=cuda:0

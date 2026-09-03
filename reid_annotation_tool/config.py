@@ -18,7 +18,7 @@ a key in ``reid.yaml``. Sections are grouped by *who owns the decision*:
 ``pairs``       what makes two crops evidence
 ``mine``        candidate ranking
 ``serve``       the review web app
-``train``       the external trainer bridge
+``train``       the handoff to an external trainer (paths only, never its hyperparameters)
 
 Defaults are the values this tool shipped as CLI defaults, so an existing
 project keeps behaving the same once its flags move into the file.
@@ -83,16 +83,26 @@ DEFAULTS: dict[str, dict] = {
         "reid_provider": "auto", "reid_batch_size": 64,
     },
     "serve": {"host": "127.0.0.1", "port": 8000},
+    # Only the handoff itself. A backbone or a learning rate is not a property
+    # of a dataset, so it is not a key of this tool -- see RETIRED below.
     "train": {
         "pairs": "", "trainer": "", "python": "", "name": "reviewed",
-        "base_config": "", "backbone": "osnet_x0_25", "pretrained_path": "",
-        "no_pretrained": False, "tasks": "reid", "objective": "id_triplet",
-        "reid_dim": 512, "num_classes": 4, "img_size": 224, "reid_epochs": 300,
-        "cls_epochs": 0, "reid_lr": 1e-4, "cls_lr": 1e-4, "backbone_lr": 1e-5,
-        "batch_size": 32, "workers": 4, "patience": 15, "data_cls": "",
-        "csv_cls": "labels.csv", "device": "", "seed": 0, "set": [],
-        "export": False, "allow_conflicts": False, "dry_run": False,
+        "tasks": "reid", "base_config": "", "set": [], "export": False,
+        "allow_conflicts": False, "dry_run": False,
     },
+}
+
+# Keys this tool used to own and deliberately handed back. Carrying one is an
+# error like any unknown key, but a bare "unknown key" would leave the reader
+# guessing whether it was a typo or a removal, so the error says where it went.
+RETIRED: dict[str, tuple[frozenset[str], str]] = {
+    "train": (frozenset({
+        "backbone", "backbone_lr", "batch_size", "cls_epochs", "cls_lr", "csv_cls",
+        "data_cls", "device", "img_size", "no_pretrained", "num_classes",
+        "objective", "patience", "pretrained_path", "reid_dim", "reid_epochs",
+        "reid_lr", "seed", "workers",
+    }), "belong to your trainer, not to the dataset: put them in the YAML named "
+        "by `train.base_config`, or pass them with `train.set: [\"section.key=value\"]`"),
 }
 
 # Which sections make up each stage's flat argument namespace. The stage code
@@ -155,6 +165,15 @@ def find(explicit: str | Path | None = None, start: Path | None = None) -> Path:
         "  全新的项目才需要：    python app.py init")
 
 
+def retired_hint(section: str, keys: list[str]) -> str:
+    """Name the keys that were removed rather than mistyped, and where they went."""
+    entry = RETIRED.get(section)
+    if entry is None:
+        return ""
+    hit = sorted(set(keys) & entry[0])
+    return f"\n  {sorted(hit)} {entry[1]}" if hit else ""
+
+
 def load(path: Path) -> "Project":
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
@@ -174,7 +193,8 @@ def load(path: Path) -> "Project":
         strange = [] if name in OPEN_SECTIONS else sorted(set(values) - set(DEFAULTS[name]))
         if strange:
             raise ConfigError(f"{path}: unknown `{name}` keys {strange}; "
-                              f"known: {sorted(DEFAULTS[name])}")
+                              f"known: {sorted(DEFAULTS[name])}"
+                              + retired_hint(name, strange))
         merged[name].update(values)
     dataset = raw.get("dataset") or ""
     if not dataset:
@@ -201,7 +221,8 @@ def apply_override(sections: dict, override: str) -> None:
     if name not in sections:
         raise ConfigError(f"--set: unknown section {name!r}")
     if name not in OPEN_SECTIONS and key not in DEFAULTS[name]:
-        raise ConfigError(f"--set: unknown `{name}` key {key!r}")
+        raise ConfigError(f"--set: unknown `{name}` key {key!r}"
+                          + retired_hint(name, [key]))
     sections[name][key] = yaml.safe_load(raw)
 
 
