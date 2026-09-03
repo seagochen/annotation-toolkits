@@ -1,0 +1,214 @@
+:root {
+  --bg: #14161a; --panel: #1c1f26; --panel-2: #232833; --line: #2f3542;
+  --text: #e7eaf0; --muted: #9aa3b2; --accent: #3d8bfd; --same: #2ea36b;
+  --different: #d9534f; --unclear: #c9a227; --error: #e05252; --warn: #d9a441;
+}
+* { box-sizing: border-box; }
+
+/* The UA stylesheet's `[hidden] { display: none }` is a user-agent-origin rule, so any
+   author-origin `display` declaration beats it regardless of selector weight. `.zoom`
+   sets `display: flex`, which kept the full-screen 92%-opaque overlay painted over the
+   whole page from load onwards and made every crop look black. Give the attribute back
+   its meaning for every element that uses it (`#zoom`, `#load-more`). */
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui,
+  "Noto Sans CJK SC", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+}
+kbd {
+  background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 4px; padding: 1px 6px; font-size: 12px; font-family: ui-monospace, monospace;
+}
+button {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px;
+}
+button:hover { border-color: var(--accent); }
+select, input[type=search], textarea {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px;
+}
+
+header {
+  display: flex; align-items: center; gap: 20px; padding: 10px 16px;
+  background: var(--panel); border-bottom: 1px solid var(--line); position: sticky;
+  top: 0; z-index: 5;
+}
+.brand { font-weight: 700; letter-spacing: .3px; }
+.progress { display: flex; align-items: center; gap: 10px; min-width: 260px; }
+.bar { flex: 1; height: 8px; background: var(--panel-2); border-radius: 6px; overflow: hidden; }
+.bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.numbers { color: var(--muted); font-variant-numeric: tabular-nums; }
+.numbers b { color: var(--text); }
+.tabs { display: flex; gap: 6px; margin-left: auto; }
+.tab.active { border-color: var(--accent); color: #fff; }
+.badge {
+  display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 10px;
+  background: var(--line); color: var(--text); font-size: 11px;
+}
+.badge.hot { background: var(--error); color: #fff; }
+.status {
+  color: var(--muted); min-width: 96px; max-width: 380px; text-align: right;
+  font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: grid; }
+#tab-review { grid-template-columns: 320px 1fr; height: calc(100vh - 57px); }
+#tab-conflicts, #tab-help { display: none; }
+#tab-conflicts.active, #tab-help.active { display: block; padding: 16px; overflow: auto;
+  height: calc(100vh - 57px); }
+
+aside {
+  border-right: 1px solid var(--line); display: flex; flex-direction: column;
+  min-height: 0; background: var(--panel);
+}
+.filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px;
+  border-bottom: 1px solid var(--line); }
+.filters input { grid-column: 1 / -1; }
+#queue { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+#queue li {
+  padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer;
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 12px;
+}
+#queue li:hover { background: var(--panel-2); }
+#queue li.active { background: #223049; box-shadow: inset 3px 0 0 var(--accent); }
+#queue .who { font-family: ui-monospace, monospace; color: var(--text); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+#queue .meta { color: var(--muted); grid-column: 1 / -1; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); align-self: center; }
+.dot.same { background: var(--same); } .dot.different { background: var(--different); }
+.dot.unclear { background: var(--unclear); }
+.load-more { margin: 8px; }
+
+.card { padding: 16px; overflow: auto; }
+.card .empty { color: var(--muted); padding: 40px; text-align: center; }
+.card-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  margin-bottom: 12px; }
+.card-head h2 { margin: 0; font-size: 16px; font-family: ui-monospace, monospace; }
+.chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
+  padding: 2px 10px; font-size: 12px; color: var(--muted); }
+.chip b { color: var(--text); font-variant-numeric: tabular-nums; }
+.question { color: var(--muted); margin: 0 0 12px; }
+.sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.sides.single { grid-template-columns: 1fr; }
+.side { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.side h3 { margin: 0 0 4px; font-size: 13px; font-family: ui-monospace, monospace; }
+.side .sub { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.pics { display: flex; flex-wrap: wrap; gap: 6px; }
+.pics img {
+  height: 190px; width: auto; max-width: 150px; object-fit: contain; background: #0d0f13;
+  border: 2px solid transparent; border-radius: 4px; cursor: zoom-in;
+}
+.pics img.evidence { border-color: var(--accent); }
+.evidence-row { display: flex; gap: 10px; margin-bottom: 12px; align-items: flex-start; }
+.evidence-row img { height: 260px; background: #0d0f13; border: 2px solid var(--accent);
+  border-radius: 4px; cursor: zoom-in; }
+.review { display: flex; align-items: center; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.verdict { padding: 9px 18px; font-size: 14px; font-weight: 600; }
+.verdict.same.active { background: var(--same); border-color: var(--same); color: #fff; }
+.verdict.different.active { background: var(--different); border-color: var(--different); color: #fff; }
+.verdict.unclear.active { background: var(--unclear); border-color: var(--unclear); color: #17191d; }
+.saved { color: var(--same); font-size: 12px; }
+.saved.failed { color: var(--error); }
+#notes { width: 100%; margin-top: 10px; min-height: 46px; resize: vertical; }
+.auto { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+
+.conflict-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+#conflict-summary { color: var(--muted); }
+.conflict {
+  background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--error);
+  border-radius: 8px; padding: 12px; margin-bottom: 12px;
+}
+.conflict.warning { border-left-color: var(--warn); }
+.conflict h3 { margin: 0 0 4px; font-size: 14px; }
+.conflict .kind { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
+.conflict .chain { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted);
+  margin: 6px 0; word-break: break-all; }
+.witnesses { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.witness { font-family: ui-monospace, monospace; font-size: 12px; padding: 3px 9px; }
+.help { max-width: 820px; }
+.help table { border-collapse: collapse; margin-bottom: 20px; }
+.help td { padding: 4px 16px 4px 0; }
+.help li { margin-bottom: 6px; }
+.help code { background: var(--panel-2); border-radius: 4px; padding: 1px 5px;
+  font-family: ui-monospace, monospace; font-size: 12px; }
+
+.zoom {
+  position: fixed; inset: 0; background: rgba(6, 8, 12, .92); display: flex;
+  align-items: center; justify-content: center; z-index: 20; cursor: zoom-out;
+}
+.zoom img { max-width: 92vw; max-height: 92vh; image-rendering: auto; }
+
+/* Conflict chain: one row per witness, so provenance sits beside the id instead of behind it. */
+.witnesses .link { display: flex; align-items: baseline; gap: 10px; margin: 4px 0; flex-wrap: wrap; }
+.witnesses .link-detail { color: var(--muted); font-size: 12px; }
+.witness.locked { opacity: .75; border-style: dashed; cursor: not-allowed; }
+.witnesses .link.base .witness { border-color: var(--warn); }
+
+/* Conflict detail page: whole-chain expansion with per-track colour chips.
+   Colour marks identity; endpoints carry a textual ⚠ marker as well, so the
+   page stays readable without colour vision. */
+.conflict.clickable { cursor: pointer; }
+.conflict.clickable:hover { border-color: var(--accent); }
+.conflict .hint { color: var(--accent); font-size: 12px; margin-top: 8px; }
+.detail-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.detail-title { margin: 0 0 12px; font-size: 15px; }
+.id-chip {
+  font-family: ui-monospace, monospace; font-size: 12px; padding: 2px 9px;
+  border: 1.5px solid var(--line); border-radius: 999px; background: #0d0f13;
+  white-space: nowrap;
+}
+.endpoint-mark { color: var(--error); }
+.contradiction {
+  background: var(--panel); border: 1px solid var(--error);
+  border-left: 4px solid var(--error); border-radius: 8px; padding: 12px;
+  margin-bottom: 14px;
+}
+.contradiction h3 { margin: 0 0 8px; font-size: 14px; display: flex;
+  align-items: center; gap: 8px; flex-wrap: wrap; }
+.contradiction ul { margin: 0; padding-left: 20px; }
+.contradiction li { margin-bottom: 4px; }
+.verdict-line { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+.metric-note { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+.edge-card { background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.edge-card.weakest { border-color: var(--warn); box-shadow: inset 4px 0 0 var(--warn); }
+.edge-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.edge-index { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.edge-eq { color: var(--same); font-family: ui-monospace, monospace; font-size: 12px; }
+.weak-badge { color: var(--warn); font-size: 12px; font-weight: 700; }
+.edge-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+.edge-side .pics { margin-top: 6px; }
+.edge-side .pics img { height: 130px; }
+.edge-side .sub { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.provenance { margin-top: 10px; display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--muted); }
+.prov.base { font-family: ui-monospace, monospace; }
+.prov.neg { color: var(--error); }
+.prov .note { display: block; color: var(--unclear); }
+.answer-same .answer-text { color: var(--same); }
+.answer-different .answer-text { color: var(--different); }
+.answer-unclear .answer-text { color: var(--unclear); }
+
+/* Judging a relation in place (conflict detail page). Every card carries the
+   same three buttons as the review queue, and the button matching the verdict
+   already on record is filled in — an edge nobody has answered must be
+   distinguishable at a glance from one a past round already settled. */
+.decision {
+  margin-top: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  border-top: 1px dashed var(--line); padding-top: 10px;
+}
+.decision.conflicting { border-top-color: var(--warn); }
+.decision.busy { opacity: .5; pointer-events: none; }
+.decision-caption { color: var(--text); font-size: 12px; font-weight: 600; }
+.decision-origin { color: var(--muted); font-size: 12px; }
+.decision .verdict { padding: 5px 16px; font-size: 13px; font-weight: 600; }
+.edge-state {
+  font-size: 11px; padding: 1px 9px; border-radius: 999px; color: var(--muted);
+  border: 1px solid var(--line);
+}
+.edge-state.same { color: var(--same); border-color: var(--same); }
+.edge-state.different { color: var(--different); border-color: var(--different); }
+.edge-state.unclear { color: var(--unclear); border-color: var(--unclear); }
+.edge-state.conflicting { color: var(--warn); border-color: var(--warn); }

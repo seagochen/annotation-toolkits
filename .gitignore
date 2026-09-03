@@ -1,0 +1,33 @@
+# Python bytecode / packaging
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Test / lint / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local project config (written by `python app.py init`; holds machine-
+# specific dataset/model paths, not meant to be shared) -- keep the
+# checked-in example.
+reid.yaml
+reid.yml
+reid-annotation.yaml
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

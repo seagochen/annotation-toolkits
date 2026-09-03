@@ -1,0 +1,20 @@
+# Runtime dependencies for the whole workbench.
+#   pip install -r requirements.txt
+#
+# Only PyYAML is needed to review, audit and finalize an existing dataset --
+# the web app, the conflict engine and the pair manifest are pure standard
+# library on purpose, so a reviewer's machine needs nothing heavy.
+PyYAML>=6
+
+# --- extract / mine ---------------------------------------------------------
+# Reading video and cutting crops, and the rough ReID model that ranks review
+# candidates. Needed by `app.py extract` and `app.py mine`.
+numpy>=1.24
+opencv-python>=4.8
+onnxruntime>=1.16
+
+# --- the bundled `ultralytics` reference pipeline ---------------------------
+# Only needed when pipeline.script is the bundled Ultralytics reference. A
+# project that brings its own detection/tracking script does not need this --
+# comment it out and install whatever that script imports instead.
+ultralytics>=8.1
