@@ -145,7 +145,11 @@ def answer_key(row: dict) -> tuple:
     older round may have asked it under a different id scheme entirely, which
     is why the question, not the id, is the key.
     """
-    kind = row.get("kind", "cross_track")
+    # Legacy queues have no kind column. After an in-place schema migration those same
+    # rows carry an empty value, which must remain semantically equivalent to cross_track;
+    # otherwise an older explicit "cross_track" answer and the newer correction get two
+    # different keys and falsely contradict each other.
+    kind = row.get("kind") or "cross_track"
     if kind == "track_purity":
         return (kind, row.get("person_id1", ""))
     return (kind, relation(row.get("person_id1", ""), row.get("person_id2", "")))

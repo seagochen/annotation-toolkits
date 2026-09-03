@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from reid_annotation_tool.core import PAIR_FIELDS
+from reid_annotation_tool.core import PAIR_FIELDS, supersede
 from reid_annotation_tool.server import Store
 
 from conftest import CANDIDATE_FIELDS, IDENTITY_FIELDS, TRACK_FIELDS, write_csv
@@ -102,6 +102,30 @@ def test_revise_injects_a_candidate_when_the_pair_is_not_in_the_queue(revision_s
     sources = read(store.root / "review" / "cur" / "candidate_source.csv")
     assert sources[-1]["candidate_id"] == rows[0]["candidate_id"]
     assert sources[-1]["source"] == "web_base_revision"
+
+
+def test_injection_migrates_a_legacy_candidate_header(revision_store):
+    store = revision_store
+    legacy = ("candidate_id", "split", "person_id1", "person_id2", "time_gap_sec",
+              "cosine_similarity", "review_label", "review_notes")
+    write_csv(store.candidates, legacy, [{
+        "candidate_id": "old", "split": "train", "person_id1": A, "person_id2": B,
+        "time_gap_sec": "1", "cosine_similarity": "0.5", "review_label": "same",
+        "review_notes": "",
+    }])
+    event = store.set_relation(A, C, "different", "legacy queue")
+    assert event["injected"] is True
+    with store.candidates.open(newline="", encoding="utf-8") as handle:
+        fields = csv.DictReader(handle).fieldnames
+    assert {"kind", "img1", "img2"}.issubset(fields)
+
+
+def test_legacy_blank_kind_and_cross_track_share_revision_precedence():
+    old = {"kind": "cross_track", "person_id1": A, "person_id2": C,
+           "review_label": "same", "candidate_id": "old"}
+    corrected = {"kind": "", "person_id1": A, "person_id2": C,
+                 "review_label": "different", "candidate_id": "corrected"}
+    assert supersede([old, corrected]) == [corrected]
 
 
 def test_physical_evidence_cannot_be_overruled(revision_store):
