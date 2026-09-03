@@ -57,6 +57,26 @@ def test_transitive_negatives_in_one_same_component_are_grouped(dataset):
     assert conflict.witnesses == ["base:negative_ac", "base:negative_ad", "c1", "c2", "c3"]
 
 
+def test_non_intersecting_paths_in_one_component_stay_separate(dataset):
+    """Acceptance criterion 4 from the issue: two negative constraints whose
+    explanation paths do not intersect must remain two conflicts, even when
+    both live inside one positive connected component."""
+    write_csv(dataset / "pairs.csv", PAIR_FIELDS,
+              [pair("a", "c", 0, evidence="negative_ac"),
+               pair("d", "f", 0, evidence="negative_df")])
+    write_csv(dataset / "review.csv", CANDIDATE_FIELDS,
+              [candidate("c1", "a", "b", "same"), candidate("c2", "b", "c", "same"),
+               candidate("c3", "c", "d", "same"), candidate("c4", "d", "e", "same"),
+               candidate("c5", "e", "f", "same")])
+
+    conflicts = [item for item in detect(view(dataset)) if item.kind == "transitive_negative"]
+
+    assert len(conflicts) == 2
+    assert sorted(item.identities for item in conflicts) == [
+        ["a", "b", "c"], ["d", "e", "f"]]
+    assert all(item.detail["negative_constraints"] == 1 for item in conflicts)
+
+
 def test_covisible_tracks_may_not_be_merged(dataset):
     write_csv(dataset / "covisibility.csv", COVISIBLE_FIELDS,
               [{"person_id1": "a", "person_id2": "b", "video": "v0.mp4", "split": "train",

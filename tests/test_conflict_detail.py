@@ -162,6 +162,24 @@ def test_grouped_transitive_paths_share_one_deduplicated_detail(chain_dataset):
                 for edge in detail["edges"]}) == 12
 
 
+def test_witness_chain_uses_each_constraints_own_relation_key(chain_dataset):
+    """A grouped conflict's `identities` is the union of every sub-path, so its
+    first/last entries no longer name a real relation once more than one
+    endpoint pair is involved. `chain` must still resolve each witness against
+    the relation it actually came from."""
+    root, current, _ = chain_dataset
+    rows = read_csv(root / "pairs.csv")
+    rows.append(chain_pair("n00", "n10", 0, "second_proven_negative"))
+    write_csv(root / "pairs.csv", PAIR_FIELDS_WITH_BATCH, rows)
+
+    conflict = transitive_conflict(make_store(chain_dataset).conflict_report())
+    by_witness = {link["witness"]: link for link in conflict["chain"]}
+
+    assert by_witness["base:second_proven_negative"]["rows"] == 1
+    assert by_witness["base:covisible_tracks_cross_crops"]["rows"] == 1
+    assert by_witness["base:covisible_proven_different"]["rows"] == 1
+
+
 def test_shared_evidence_base_edges_stay_distinct(chain_dataset):
     root, current, base_lines = chain_dataset
     store = make_store(chain_dataset)

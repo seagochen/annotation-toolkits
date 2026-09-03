@@ -460,15 +460,24 @@ class Provenance:
         identities = conflict.get("identities") or []
         if len(identities) < 2:
             return []
-        key = relation(identities[0], identities[-1])
-        endpoint_rows = context["base_by_pair"].get(key, [])
+        # `identities` is the union of every grouped constraint's path, so its
+        # first/last entries no longer name a real relation once a conflict
+        # holds more than one endpoint pair. Look up each pair's own evidence
+        # instead of guessing one from the merged identity list.
+        detail = conflict.get("detail") or {}
+        endpoint_pairs = [tuple(item["endpoints"]) for item in detail.get("same_paths", [])
+                          if item.get("endpoints")]
+        if not endpoint_pairs:
+            endpoint_pairs = [(identities[0], identities[-1])]
+        keys = [relation(left, right) for left, right in endpoint_pairs]
+        endpoint_rows = [row for key in keys for row in context["base_by_pair"].get(key, [])]
         answers = context["answers_by_candidate"]
 
-        # Which round originally said "different" about this very relation.
+        # Which round originally said "different" about any of these relations.
         origin_rounds = sorted({entry["round"] for entries in answers.values()
                                 for entry in entries if entry["label"] == "different"
                                 and relation(entry["person_id1"],
-                                             entry["person_id2"]) == key})
+                                             entry["person_id2"]) in keys})
 
         chain = []
         for witness in dict.fromkeys(conflict.get("witnesses") or []):

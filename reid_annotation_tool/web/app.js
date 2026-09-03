@@ -18,7 +18,7 @@ const CAPTION = { same: "同一目标", different: "不同目标", unclear: "无
 const state = {
   rows: [], index: -1, total: 0, offset: 0, limit: 60,
   auto: true, busy: false, loading: false, appState: null,
-  openConflict: null,
+  openConflict: null, openConflictKind: null, openConflictIdentities: [],
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -357,13 +357,28 @@ async function loadConflicts(refresh = false) {
 }
 
 // A chain that vanished after a verdict is the success case, not an empty
-// page: say so and go back to the list.
+// page: say so and go back to the list. But a grouped conflict's group_key is
+// the identity union of its member paths, so resolving one member re-shapes
+// the key even though the rest of the group is still unresolved -- an exact
+// key miss must fall back to identity overlap before it is read as "solved".
 async function refreshOpenConflict() {
   const key = state.openConflict;
+  const kind = state.openConflictKind;
+  const priorIdentities = state.openConflictIdentities;
   const value = await fetchConflicts(true);
-  const again = key && value.conflicts.find((item) => conflictKey(item) === key);
-  if (again) {
-    showConflictDetail(again, true);
+  const exact = key && value.conflicts.find((item) => conflictKey(item) === key);
+  if (exact) {
+    showConflictDetail(exact, true);
+    return;
+  }
+  const remaining = priorIdentities.length ? value.conflicts.filter((item) =>
+    item.kind === kind
+    && (item.identities || []).some((identity) => priorIdentities.includes(identity))) : [];
+  if (remaining.length) {
+    showConflictDetail(remaining[0], false);
+    if (remaining.length > 1) {
+      status(`该组已拆分为 ${remaining.length} 个待审冲突，已跳转到其中一个`);
+    }
   } else {
     closeConflictDetail();
     status("该冲突链已消除");
@@ -590,13 +605,21 @@ function relationGraph(detail, colors) {
   }
   const maxRows = Math.max(...[...columns.values()].map((values) => values.length));
   const nodeWidth = 250, nodeHeight = 42, xGap = 305, yGap = 82, padding = 34;
+  // Different-edges are routed through a dedicated lane strip above every
+  // node row (see below) instead of arcing over the row itself: a smooth arc
+  // only clears node height near its own midpoint, so for a chain longer than
+  // a couple of columns most of it is painted over by intermediate nodes.
+  const laneCount = Math.min(endpointPairs.length, 4);
+  const laneGap = 14;
+  const laneTop = 10;
+  const gridTop = laneTop + laneCount * laneGap + 22;
   const width = Math.max(620, (lastLevel + 1) * xGap + padding * 2);
-  const height = Math.max(150, maxRows * yGap + padding * 2);
+  const height = Math.max(150, maxRows * yGap + gridTop + padding);
   const positions = new Map();
   for (const [column, identities] of columns) {
     identities.forEach((identity, row) => positions.set(identity, {
       x: padding + column * xGap,
-      y: padding + (row + (maxRows - identities.length) / 2) * yGap,
+      y: gridTop + (row + (maxRows - identities.length) / 2) * yGap,
     }));
   }
 
@@ -630,11 +653,13 @@ function relationGraph(detail, colors) {
   for (const [index, pair] of endpointPairs.entries()) {
     const first = positions.get(pair[0]), second = positions.get(pair[1]);
     if (!first || !second) continue;
-    const x1 = first.x + nodeWidth / 2, y1 = first.y + nodeHeight / 2;
-    const x2 = second.x + nodeWidth / 2, y2 = second.y + nodeHeight / 2;
-    const bend = 28 + (index % 4) * 13;
+    const x1 = first.x + nodeWidth / 2, x2 = second.x + nodeWidth / 2;
+    // The lane sits above gridTop, i.e. above every node's top edge in the
+    // whole graph, so the horizontal run cannot be hidden behind any node
+    // regardless of how many columns it spans.
+    const lane = laneTop + (index % laneCount) * laneGap;
     const path = svgEl("path", {
-      d: `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${Math.min(y1, y2) - bend} ${x2} ${y2}`,
+      d: `M ${x1} ${first.y} L ${x1} ${lane} L ${x2} ${lane} L ${x2} ${second.y}`,
       class: "graph-different-edge",
     });
     svg.append(path);
@@ -746,6 +771,8 @@ function showConflictDetail(item, keepScroll = false) {
   const detail = item.conflict_detail;
   if (!detail) return;
   state.openConflict = conflictKey(item);
+  state.openConflictKind = item.kind;
+  state.openConflictIdentities = item.identities || [];
   const panel = $("#tab-conflicts");
   const scroll = panel.scrollTop;
   const colors = new Map(detail.path.map((identity, index) =>
@@ -786,6 +813,8 @@ function closeConflictDetail() {
   const container = $("#conflict-detail");
   if (!container) return;
   state.openConflict = null;
+  state.openConflictKind = null;
+  state.openConflictIdentities = [];
   container.hidden = true;
   container.replaceChildren();
   $("#conflict-list").hidden = false;
