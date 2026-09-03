@@ -36,6 +36,9 @@ def validate_pairs(path: Path, tasks: str) -> dict:
     missing = required - set(rows[0] if rows else {})
     if missing:
         raise SystemExit(f"{path} is missing columns: {sorted(missing)}")
+    invalid = [row for row in rows if row.get("label") not in {"0", "1"}]
+    if invalid:
+        raise SystemExit(f"{path} contains {len(invalid)} unresolved/invalid labels")
     counts = split_label_counts(rows)
     if tasks in {"reid", "both"}:
         for split in ("train", "val"):
@@ -45,6 +48,22 @@ def validate_pairs(path: Path, tasks: str) -> dict:
                     f"split={split} needs both positive and negative pairs "
                     f"(found {value}); the trainer cannot evaluate ROC-AUC otherwise")
     return counts
+
+
+def pair_provenance(path: Path) -> dict:
+    """Auditable source counts without changing the trainer's compact pair schema."""
+    rows = read_csv(path)
+    by_split_evidence = Counter((row.get("split", ""), row.get("evidence", "unknown"))
+                                for row in rows)
+    return {
+        "rows": len(rows),
+        "human_reviewed": sum(row.get("evidence", "").startswith("reviewed_") for row in rows),
+        "by_split_evidence": {
+            split: dict(sorted((evidence, count) for (item_split, evidence), count
+                               in by_split_evidence.items() if item_split == split))
+            for split in sorted({key[0] for key in by_split_evidence})
+        },
+    }
 
 
 def build_config(root: Path, args, project: Path) -> dict:
@@ -152,7 +171,10 @@ def train(root: Path, args) -> dict:
     manifest = {
         "schema": 1, "created_at": datetime.now().astimezone().isoformat(),
         "dataset_root": str(root), "pairs": str(pairs), "pairs_sha256": sha256(pairs),
-        "pair_counts": counts, "conflict_gate": {k: gate[k] for k in
+        "pair_counts": counts, "pair_provenance": pair_provenance(pairs),
+        "dataset_hashes": {name: sha256(root / name) for name in
+                           ("identities.csv", "tracks.csv") if (root / name).is_file()},
+        "conflict_gate": {k: gate[k] for k in
                                                  ("errors", "warnings", "pending_reviews", "by_kind")},
         "trainer": str(trainer), "trainer_git": git_revision(trainer),
         "command": command, "config": config,

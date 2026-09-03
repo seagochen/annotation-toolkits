@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from reid_annotation_tool.train import (build_config, latest_run, train,
+from reid_annotation_tool.train import (build_config, latest_run, pair_provenance, train,
                                         validate_pairs)
 
 from conftest import CANDIDATE_FIELDS, candidate, pair, write_csv
@@ -71,6 +71,21 @@ def test_missing_columns_are_reported(tmp_path):
     (tmp_path / "bad.csv").write_text("img1,img2\na.jpg,b.jpg\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="missing columns"):
         validate_pairs(tmp_path / "bad.csv", "reid")
+
+
+def test_unresolved_labels_are_rejected(tmp_path):
+    path = tmp_path / "pairs.csv"
+    write_csv(path, PAIR_FIELDS, [pair("a", "b", "")])
+    with pytest.raises(SystemExit, match="unresolved/invalid"):
+        validate_pairs(path, "reid")
+
+
+def test_pair_provenance_counts_human_evidence(tmp_path):
+    path = tmp_path / "pairs.csv"
+    write_csv(path, PAIR_FIELDS, [pair("a", "b", 0, evidence="reviewed_model_mined_different"),
+                                  pair("c", "d", 0, evidence="covisible_tracks_cross_crops")])
+    report = pair_provenance(path)
+    assert report["rows"] == 2 and report["human_reviewed"] == 1
 
 
 def test_config_points_the_trainer_at_the_reviewed_dataset(tmp_path):
