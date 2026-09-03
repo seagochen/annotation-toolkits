@@ -104,6 +104,12 @@ def file_verdict(candidates: Path, key: tuple[str, str], verdict: str, notes: st
         return {"candidate_id": matched[0]["candidate_id"], "injected": False,
                 "candidate_ids": [row["candidate_id"] for row in matched]}
 
+    # Older review queues predate `kind` and representative image columns. A conflict-page
+    # verdict may need to inject a relation into such a queue, so migrate its header before
+    # writing instead of handing DictWriter keys it cannot represent.
+    for field in ("kind", "img1", "img2", *injected_defaults):
+        if field not in fields:
+            fields.append(field)
     injected = {field: "" for field in fields}
     injected.update({
         "candidate_id": candidate_id("cross_track", *key), "kind": "cross_track",
