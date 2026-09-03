@@ -83,10 +83,10 @@ python app.py status        # 数据集现状 + 建议的下一步
 python app.py               # 起标注网页（默认动作，= serve）
 ```
 
-默认监听 `127.0.0.1:8765`（`serve.host` / `serve.port`，见 `reid_annotation_tool/config.py`
+默认监听 `127.0.0.1:8000`（`serve.host` / `serve.port`，见 `reid_annotation_tool/config.py`
 的 `DEFAULTS`），只有本机能访问；团队内网共用时把 `reid.yaml` 里的
 `serve.host` 改成 `0.0.0.0`（`configs/reid.example.yaml` 就是这样配的），
-局域网内其他机器即可访问 `http://<本机IP>:8765/`。
+局域网内其他机器即可访问 `http://<本机IP>:8000/`。
 
 这是基于标准库 `ThreadingHTTPServer` 的单进程服务，面向团队内网标注场景，
 不做鉴权，不要直接暴露公网。需要长期后台运行时，用 `tmux` / `systemd` /
@@ -347,7 +347,7 @@ INT8 必须使用独立的目标域校准图片清单。
 ## 测试
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -e '.[test]'
 python -m pytest -q
 ```
 

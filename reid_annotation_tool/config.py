@@ -82,7 +82,7 @@ DEFAULTS: dict[str, dict] = {
         "reid_onnx": "", "reid_input_size": 224, "reid_preprocess": "letterbox-bgr",
         "reid_provider": "auto", "reid_batch_size": 64,
     },
-    "serve": {"host": "127.0.0.1", "port": 8765},
+    "serve": {"host": "127.0.0.1", "port": 8000},
     "train": {
         "pairs": "", "trainer": "", "python": "", "name": "reviewed",
         "base_config": "", "backbone": "osnet_x0_25", "pretrained_path": "",

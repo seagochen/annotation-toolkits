@@ -61,7 +61,7 @@ mine:
 
 serve:
   host: 127.0.0.1
-  port: 8765
+  port: 8000
 '''
 
 STAGES = ("serve", "status", "init", "extract", "mine", "check", "finalize",

@@ -1,6 +1,11 @@
 # Runtime dependencies for the whole workbench.
 #   pip install -r requirements.txt
 #
+# This file is the one-command install for a fresh machine. For an editable
+# or partial install use the pyproject extras instead:
+#   pip install -e '.[extract,ultralytics]'   # the same set as below
+#   pip install -e '.[test]'                  # + pytest, for development
+#
 # Only PyYAML is needed to review, audit and finalize an existing dataset --
 # the web app, the conflict engine and the pair manifest are pure standard
 # library on purpose, so a reviewer's machine needs nothing heavy.
