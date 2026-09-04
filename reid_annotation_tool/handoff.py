@@ -1,10 +1,20 @@
-"""Retrain the ReID model from a reviewed dataset with an external trainer plugin.
+"""Hand a reviewed dataset to somebody else's trainer, and record what was fed.
 
-The bridge is deliberately narrow: this tool owns the *evidence* (which pairs
-are trustworthy and why), the plugin owns the *optimisation*. Training refuses
-to start on a dataset whose identity logic contradicts itself, and every run
-records the exact CSV digest it consumed so a checkpoint can be traced back to
-the annotations that produced it.
+Nothing here trains anything -- there is no model, no loss and no optimiser in
+this package, on purpose. This module is the handoff: it refuses to start on a
+dataset whose identity logic contradicts itself, tells the trainer where the
+dataset and the reviewed pair manifest are, launches it, and writes down the
+exact bytes it consumed so a checkpoint can be traced back to the annotations
+that produced it.
+
+The interface is four keys, and they are the only ones this tool writes into
+the trainer's config (see ``OWNED``): the dataset root, the pair manifest, and
+where the run should land. Backbones, objectives, learning rates and epochs are
+the trainer's business, not the dataset's -- they come from the user's own
+trainer config (``train.base_config``) and ``train.set`` overrides, and this
+tool neither defines defaults for them nor validates them. A dataset tool that
+shipped an opinion about somebody else's optimiser would be wrong for every
+deployment but one, and would quietly rot as their trainer moved on.
 """
 
 from __future__ import annotations
@@ -22,6 +32,13 @@ from .core import atomic_write_json, read_csv, sha256
 
 TASK_DIRECTORY = {"reid": "reid", "cls": "cls", "both": "both"}
 
+# The only values this tool writes into the trainer's config, because it is the
+# only party that knows them. They are also refused as ``train.set`` overrides:
+# a run that trained on a different dataset than its manifest records would make
+# the whole provenance chain a lie.
+OWNED = (("data", "reid_root"), ("data", "reid_csv"),
+         ("output", "project"), ("output", "name"))
+
 
 def split_label_counts(rows: list[dict]) -> dict[str, dict[str, int]]:
     counts: Counter[tuple[str, int]] = Counter(
@@ -36,6 +53,9 @@ def validate_pairs(path: Path, tasks: str) -> dict:
     missing = required - set(rows[0] if rows else {})
     if missing:
         raise SystemExit(f"{path} is missing columns: {sorted(missing)}")
+    invalid = [row for row in rows if row.get("label") not in {"0", "1"}]
+    if invalid:
+        raise SystemExit(f"{path} contains {len(invalid)} unresolved/invalid labels")
     counts = split_label_counts(rows)
     if tasks in {"reid", "both"}:
         for split in ("train", "val"):
@@ -47,55 +67,52 @@ def validate_pairs(path: Path, tasks: str) -> dict:
     return counts
 
 
+def pair_provenance(path: Path) -> dict:
+    """Auditable source counts without changing the trainer's compact pair schema."""
+    rows = read_csv(path)
+    by_split_evidence = Counter((row.get("split", ""), row.get("evidence", "unknown"))
+                                for row in rows)
+    return {
+        "rows": len(rows),
+        "human_reviewed": sum(row.get("evidence", "").startswith("reviewed_") for row in rows),
+        "by_split_evidence": {
+            split: dict(sorted((evidence, count) for (item_split, evidence), count
+                               in by_split_evidence.items() if item_split == split))
+            for split in sorted({key[0] for key in by_split_evidence})
+        },
+    }
+
+
 def build_config(root: Path, args, project: Path) -> dict:
+    """The user's own trainer config, plus the four keys only this tool knows.
+
+    Everything else in the file is theirs and is passed through untouched: this
+    is a dataset tool, and a backbone or a learning rate is not a property of a
+    dataset.
+    """
     config: dict = {}
     if args.base_config:
         config = yaml.safe_load(Path(args.base_config).read_text(encoding="utf-8")) or {}
-    for section in ("model", "data", "train", "val", "output", "advanced"):
-        config.setdefault(section, {})
-    config["model"].update({
-        "backbone": args.backbone, "pretrained": not args.no_pretrained,
-        "tasks": args.tasks, "reid_dim": args.reid_dim,
-        "input_size": [args.img_size, args.img_size],
-    })
-    config["model"].setdefault("num_classes", args.num_classes)
-    if args.pretrained_path:
-        config["model"]["pretrained_path"] = str(Path(args.pretrained_path).resolve())
-    config["data"].update({
-        "cls_root": str(Path(args.data_cls).resolve()) if args.data_cls else "",
-        "cls_csv": args.csv_cls, "reid_root": str(root), "reid_csv": args.pairs,
-    })
-    config["train"].update({
-        "reid_objective": args.objective,
-        "reid_epochs": args.reid_epochs, "cls_epochs": args.cls_epochs,
-        "reid_lr": args.reid_lr, "cls_lr": args.cls_lr, "backbone_lr": args.backbone_lr,
-        "batch_size": args.batch_size, "num_workers": args.workers,
-        "patience": args.patience,
-    })
-    config["train"].setdefault("weight_decay", 0.0)
-    config["train"].setdefault("contrastive_margin", 0.5)
-    if args.objective == "id_triplet":
-        config["train"].setdefault("triplet_margin", 0.3)
-        config["train"].setdefault("triplet_weight", 1.0)
-        config["train"].setdefault("identity_weight", 1.0)
-        config["train"].setdefault("identity_label_smoothing", 0.1)
-        config["train"].setdefault("identities_per_batch", 8)
-        config["train"].setdefault("images_per_identity", 4)
-        config["train"].setdefault("cross_track_fraction", 0.5)
-        config["train"].setdefault("hard_negative_fraction", 0.5)
-        config["train"].setdefault("batches_per_epoch", 0)
-    config["val"].setdefault("val_split", 0.2)
-    config["val"].setdefault("batch_size", 64)
-    config["output"].update({"project": str(project), "name": args.name})
-    config["advanced"].setdefault("ema", False)
-    config["advanced"].setdefault("seed", args.seed)
-    config["advanced"].setdefault("device", args.device)
+        if not isinstance(config, dict):
+            raise SystemExit(f"{args.base_config}: base config must be a YAML mapping")
+    else:
+        print("note: train.base_config is empty, so the trainer receives only the "
+              "dataset and output paths and must supply its own defaults", flush=True)
+
     for override in args.set or []:
         section, _, rest = override.partition(".")
         key, _, value = rest.partition("=")
-        if not section or not key:
+        if not section or not key or "=" not in rest:
             raise SystemExit(f"--set expects section.key=value, got {override!r}")
+        if (section, key) in OWNED:
+            raise SystemExit(
+                f"{section}.{key} is derived from the project (dataset root, "
+                "train.pairs, train.name) and cannot be overridden here")
         config.setdefault(section, {})[key] = yaml.safe_load(value)
+
+    # Written last so no override can point the trainer at another dataset.
+    config.setdefault("data", {}).update({"reid_root": str(root), "reid_csv": args.pairs})
+    config.setdefault("output", {}).update({"project": str(project), "name": args.name})
     return config
 
 
@@ -152,7 +169,10 @@ def train(root: Path, args) -> dict:
     manifest = {
         "schema": 1, "created_at": datetime.now().astimezone().isoformat(),
         "dataset_root": str(root), "pairs": str(pairs), "pairs_sha256": sha256(pairs),
-        "pair_counts": counts, "conflict_gate": {k: gate[k] for k in
+        "pair_counts": counts, "pair_provenance": pair_provenance(pairs),
+        "dataset_hashes": {name: sha256(root / name) for name in
+                           ("identities.csv", "tracks.csv") if (root / name).is_file()},
+        "conflict_gate": {k: gate[k] for k in
                                                  ("errors", "warnings", "pending_reviews", "by_kind")},
         "trainer": str(trainer), "trainer_git": git_revision(trainer),
         "command": command, "config": config,

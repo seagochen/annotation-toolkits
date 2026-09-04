@@ -58,8 +58,10 @@ splits:
 
 
 # -------------------------------------------------------------- projection
-# 头→身体裁剪几何。始终生效，没有关闭开关：两种几何产出的数据集不可互换。
-# 默认值是生产环境的实测标定值，换相机必须自己测。
+# 裁剪几何。只有这一条代码路径，但做什么由参数决定：
+#   extent_k: [1.0, 1.0, 1.0]  -> 恒等变换，裁剪就是流水线给的框（框已是全身时用这个）
+#   下面这组默认值         -> 头→身体投影，是生产环境的实测标定值，换相机必须自己测
+# 一个数据集只能有一种几何：两种几何产出的裁剪不可互换。
 projection:
   projection_space: [1200.0, 538.0]
   seam_x: 600.0
@@ -99,7 +101,7 @@ mine:
 
 serve:
   host: 0.0.0.0
-  port: 8765
+  port: 8000
 
 
 # ------------------------------------------------------------------- train
@@ -107,9 +109,15 @@ train:
   trainer: /home/cxt/projects/mobilenet-yolopose-plugin-pytorch
   python: /home/cxt/miniconda3/envs/aigc/bin/python
   name: scene_reviewed_v1
-  backbone: osnet_x0_25
-  pretrained_path: /home/cxt/projects/mobilenet-yolopose-plugin-pytorch/weights/pretrained/osnet_x0_25_msmt17.pth
-  objective: id_triplet
-  reid_epochs: 300
   export: true
   # pairs 留空则自动取最新的 pairs.reviewed-*.csv
+  #
+  # 模型和优化的超参不属于本节 —— backbone / lr / epochs 是训练器的事，不是数据集
+  # 的属性。它们写在你训练器自己的 YAML 里，本工具照抄并只补上四个键（数据集根目录、
+  # 配对清单、输出目录、run 名）：
+  base_config: ./my-trainer-reid.yaml
+  # 单次覆盖你训练器配置里的任意字段（节.键=值），本工具不校验这些键：
+  set:
+    - model.backbone=osnet_x0_25
+    - train.reid_epochs=300
+    - advanced.device=cuda:0
