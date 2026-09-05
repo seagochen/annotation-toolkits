@@ -31,3 +31,8 @@ reid-annotation.yaml
 .idea/
 .DS_Store
 Thumbs.db
+
+# Site-specific pipelines contain local dataset/model/device paths. Keep only
+# the portable Ultralytics example as a reviewed, versioned starting point.
+/pipeline/*
+!/pipeline/pipeline.demo.py
