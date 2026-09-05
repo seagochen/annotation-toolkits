@@ -20,6 +20,22 @@ they belong to the model, not to the dataset contract::
       conf: 0.35
       reid_onnx: /path/to/reid.onnx     # optional: tightens association only
       appearance_weight: 0.3
+
+``detector`` may also be a bare name declared under the project's ``models:``
+section instead of a literal path::
+
+    models:
+      head_detector: {path: /path/to/yolo11n.pt}
+
+    pipeline:
+      script: ultralytics
+      detector: head_detector
+
+This is the reference for wiring a pipeline to the named-model registry
+(``reid_annotation_tool.registry.ModelRegistry``): every hook here declares
+the optional fourth/third ``registry`` parameter and resolves ``detector``
+through it when the name matches an entry, falling back to the literal-path
+behaviour otherwise.
 """
 
 from __future__ import annotations
@@ -44,12 +60,23 @@ def _int_set(config: dict, key: str, fallback) -> set[int]:
     return {int(value) for value in values}
 
 
-def _setup(config: dict) -> dict:
+def _resolve_detector(weights: str, registry) -> str:
+    """A literal path, unchanged; or a name declared under `models:`, resolved
+    through the registry. Membership decides which -- a name that happens to
+    collide with a real file on disk still means the registry entry, since
+    declaring it under `models:` is what made it a name in the first place."""
+    if registry is not None and weights in registry.entries:
+        return str(registry.resolve_path(weights))
+    return weights
+
+
+def _setup(config: dict, registry=None) -> dict:
     if "detector" in _state:
         return _state
     weights = config.get("detector")
     if not weights:
         raise SystemExit("pipeline.detector is required by the ultralytics pipeline")
+    weights = _resolve_detector(str(weights), registry)
     targets = _int_set(config, "class_ids", {0})
     neighbours = _int_set(config, "neighbour_class_ids", targets)
     _state["targets"], _state["neighbours"] = targets, neighbours
@@ -89,9 +116,9 @@ def _embedder(config: dict):
                         batch_size=int(config.get("reid_batch_size", 64)))
 
 
-def open_source(source, config: dict) -> None:
+def open_source(source, config: dict, registry=None) -> None:
     """A fresh tracker per recording: ids must not survive across videos."""
-    state = _setup(config)
+    state = _setup(config, registry)
     state["tracker"] = Tracker(
         max_iou_distance=float(config.get("max_iou_distance", 0.5)),
         max_age=int(config.get("max_age", 15)),
@@ -101,10 +128,10 @@ def open_source(source, config: dict) -> None:
         appearance_recovery=bool(config.get("appearance_recovery", False)))
 
 
-def process_frame(image: np.ndarray, source, config: dict) -> list[Observation]:
-    state = _setup(config)
+def process_frame(image: np.ndarray, source, config: dict, registry=None) -> list[Observation]:
+    state = _setup(config, registry)
     if "tracker" not in state:
-        open_source(source, config)
+        open_source(source, config, registry)
     tracker = state["tracker"]
 
     detections = state["detector"].predict([image])[0]
@@ -136,14 +163,14 @@ def process_frame(image: np.ndarray, source, config: dict) -> list[Observation]:
     return found
 
 
-def detect_crops(images: list[np.ndarray], config: dict) -> list[list[Observation]]:
+def detect_crops(images: list[np.ndarray], config: dict, registry=None) -> list[list[Observation]]:
     """Crop firewall, second pass: re-detect inside each finished crop.
 
     Only the detections are returned — whether two boxes in one crop mean the
     crop is contaminated is the host's rule, so that it cannot drift between
     pipelines.
     """
-    state = _setup(config)
+    state = _setup(config, registry)
     canvases = [letterbox_canvas(image, state["crop_check_imgsz"]) for image in images]
     found: list[list[Observation]] = []
     for start in range(0, len(canvases), state["crop_check_batch"]):

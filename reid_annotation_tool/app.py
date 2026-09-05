@@ -14,6 +14,7 @@ and derived from there, and tuning lives in named sections of ``reid.yaml``
     python app.py check          # 逻辑冲突检测
     python app.py finalize       # 把已审核结论烤进新的 pairs 清单
     python app.py train          # 把数据集交给外部训练器（本工具不训练模型）
+    python app.py evaluate       # 把 checkpoint 交给外部评估器（本工具不计算指标）
 
 Anything in the file can still be overridden for one run with
 ``--set section.key=value``.
@@ -65,7 +66,7 @@ serve:
 '''
 
 STAGES = ("serve", "status", "init", "extract", "mine", "check", "finalize",
-          "train", "purge-domain")
+          "train", "evaluate", "purge-domain")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -79,7 +80,8 @@ def parser() -> argparse.ArgumentParser:
                        metavar="SECTION.KEY=VALUE", help="本次运行覆盖配置中的一个键")
     value.add_argument("--port", type=int, help="serve: 覆盖端口")
     value.add_argument("--apply", action="store_true", help="purge-domain: 真正写入")
-    value.add_argument("--dry-run", action="store_true", help="train: 只生成配置不训练")
+    value.add_argument("--dry-run", action="store_true",
+                       help="train/evaluate: 只生成配置不运行")
     value.add_argument("--strict", action="store_true", help="check: 警告也算失败")
     value.add_argument("--json", action="store_true", help="check: 输出完整 JSON")
     return value
@@ -136,23 +138,30 @@ def stage_serve(project: Project, args) -> int:
     from .server import serve
 
     live = project.live_round()
-    if live is None:
-        print("还没有审核轮次。先跑 `python app.py mine` 生成候选。")
-        return 1
     settings = project.stage("serve")
     port = args.port or settings.port
     rounds = project.rounds()
-    print(f"候选  {live.relative_to(project.dataset)}（自动发现）")
-    print(f"历史  {', '.join(path.parent.name for path in rounds)}（全部纳入冲突检测）")
-    serve(project.dataset, live, settings.host, port, project.base_pairs, rounds)
+    if live is None:
+        # Not a reason to refuse to start any more: config/model/job control
+        # (配置/模型/任务) works on a brand-new project before extract/mine
+        # have ever run, and the 任务 tab can run them from the browser.
+        print("还没有审核轮次 —— 标注页暂时没有候选，可先在网页的“任务”标签跑"
+              "`extract` / `mine`，或用 `python app.py mine` 生成。")
+    else:
+        print(f"候选  {live.relative_to(project.dataset)}（自动发现）")
+        print(f"历史  {', '.join(path.parent.name for path in rounds)}（全部纳入冲突检测）")
+    serve(project.dataset, live, settings.host, port, project.base_pairs, rounds,
+         config_path=project.path)
     return 0
 
 
 def stage_extract(project: Project, args) -> int:
     from .extract import extract, parse_day_splits
+    from .registry import ModelRegistry
 
     values = project.stage("extract")
     script, pipeline_config = project.pipeline()
+    values.registry = ModelRegistry.from_project(project)
     videos = [project.resolve(path) for path in values.video]
     if values.videos_dir:
         videos += sorted(project.resolve(values.videos_dir).glob(values.pattern))
@@ -249,8 +258,28 @@ def stage_train(project: Project, args) -> int:
     values.python = values.python or sys.executable
     values.base_config = project.resolve(values.base_config) if values.base_config else None
     values.dry_run = args.dry_run or values.dry_run
+    values.sink = getattr(args, "sink", None)
     print(f"pairs -> {values.pairs}")
     manifest = train(project.dataset, values)
+    return int(manifest.get("exit_code", 0) or 0)
+
+
+def stage_evaluate(project: Project, args) -> int:
+    from .handoff import evaluate
+
+    values = project.stage("evaluate")
+    values.pairs = values.pairs or latest_pairs(project)
+    values.review = [str(path.relative_to(project.dataset)) for path in project.rounds()]
+    values.evaluator = project.resolve(values.evaluator) if values.evaluator else Path(".")
+    values.python = values.python or sys.executable
+    values.base_config = project.resolve(values.base_config) if values.base_config else None
+    if not values.checkpoint:
+        raise SystemExit("evaluate: 需要 evaluate.checkpoint（要评估哪个训练产出）")
+    values.checkpoint = project.resolve(values.checkpoint)
+    values.dry_run = args.dry_run or values.dry_run
+    values.sink = getattr(args, "sink", None)
+    print(f"pairs -> {values.pairs}")
+    manifest = evaluate(project.dataset, values)
     return int(manifest.get("exit_code", 0) or 0)
 
 
@@ -270,7 +299,8 @@ def stage_purge(project: Project, args) -> int:
 DISPATCH = {
     "serve": stage_serve, "status": lambda project, args: stage_status(project),
     "extract": stage_extract, "mine": stage_mine, "check": stage_check,
-    "finalize": stage_finalize, "train": stage_train, "purge-domain": stage_purge,
+    "finalize": stage_finalize, "train": stage_train, "evaluate": stage_evaluate,
+    "purge-domain": stage_purge,
 }
 
 

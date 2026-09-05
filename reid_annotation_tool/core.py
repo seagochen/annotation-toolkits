@@ -34,12 +34,15 @@ def atomic_write_csv(path: Path, rows: list[dict], fields) -> None:
     temporary.replace(path)
 
 
-def atomic_write_json(path: Path, value: object) -> None:
+def atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-                         encoding="utf-8")
+    temporary.write_text(text, encoding="utf-8")
     temporary.replace(path)
+
+
+def atomic_write_json(path: Path, value: object) -> None:
+    atomic_write_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
 def sha256(path: Path) -> str:

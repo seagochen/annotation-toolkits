@@ -19,6 +19,8 @@ a key in ``reid.yaml``. Sections are grouped by *who owns the decision*:
 ``mine``        candidate ranking
 ``serve``       the review web app
 ``train``       the handoff to an external trainer (paths only, never its hyperparameters)
+``evaluate``    the handoff to an external evaluator (paths only, never a metric definition)
+``models``      named model checkpoints a pipeline script may look up by name
 
 Defaults are the values this tool shipped as CLI defaults, so an existing
 project keeps behaving the same once its flags move into the file.
@@ -32,7 +34,7 @@ from types import SimpleNamespace
 
 import yaml
 
-from .core import read_csv
+from .core import atomic_write_text, read_csv
 
 CONFIG_NAMES = ("reid.yaml", "reid.yml", "reid-annotation.yaml")
 CONFIG_ENV = "REID_CONFIG"
@@ -90,7 +92,25 @@ DEFAULTS: dict[str, dict] = {
         "tasks": "reid", "base_config": "", "set": [], "export": False,
         "allow_conflicts": False, "dry_run": False,
     },
+    # The handoff for measuring a trained checkpoint, mirroring `train` above:
+    # paths only, never a metric definition -- what counts as a good score is
+    # the evaluator's business, not the dataset's.
+    "evaluate": {
+        "pairs": "", "evaluator": "", "python": "", "checkpoint": "",
+        "name": "eval", "split": "test", "tasks": "reid",
+        "base_config": "", "set": [], "allow_conflicts": False, "dry_run": False,
+    },
+    # Named model checkpoints, open like `pipeline` (see OPEN_SECTIONS) because
+    # each entry is itself a small mapping, not a flat key -> scalar. The one
+    # rule this tool owns -- every entry needs `path` -- is checked at the
+    # point of use (`Project.models()`), the same way `pipeline()` is the only
+    # place that checks `script` is non-empty.
+    "models": {},
 }
+
+# The known keys of one `models.<name>` entry. Not in DEFAULTS proper because
+# `models` itself holds names, not these keys directly -- see Project.models().
+MODEL_DEFAULTS: dict = {"path": "", "framework": "pytorch", "device": "cpu", "kind": ""}
 
 # Keys this tool used to own and deliberately handed back. Carrying one is an
 # error like any unknown key, but a bare "unknown key" would leave the reader
@@ -113,11 +133,12 @@ STAGE_SECTIONS = {
     "mine": ("mine",),
     "serve": ("serve",),
     "train": ("train",),
+    "evaluate": ("evaluate",),
 }
 
 
 # Sections whose keys this tool does not own and therefore cannot validate.
-OPEN_SECTIONS = ("pipeline",)
+OPEN_SECTIONS = ("pipeline", "models")
 
 
 class ConfigError(RuntimeError):
@@ -200,6 +221,36 @@ def load(path: Path) -> "Project":
     if not dataset:
         raise ConfigError(f"{path}: `dataset:` (the dataset root) is required")
     return Project(path, resolve(path.parent, dataset), merged)
+
+
+def dump(dataset: str, sections: dict) -> str:
+    """Render project sections back to YAML.
+
+    Not comment-preserving -- PyYAML round-trips drop hand-written comments,
+    and every default fills in explicitly rather than staying implicit.
+    Saving from the web UI is an explicit, flagged trade-off (surfaced in the
+    UI); hand-edit the file directly when comments or brevity matter.
+    """
+    return yaml.dump({"dataset": dataset, **sections}, allow_unicode=True, sort_keys=False)
+
+
+def save(project: "Project", sections: dict) -> None:
+    """Validate a candidate set of sections before ever touching the real file.
+
+    Written to a scratch file first and loaded through the same `load()` this
+    tool trusts everywhere else: a rejected edit can never corrupt the live
+    config, because the live file is only replaced once the candidate passed.
+    """
+    raw = yaml.safe_load(project.path.read_text(encoding="utf-8")) or {}
+    dataset_value = raw.get("dataset", str(project.dataset))
+    text = dump(dataset_value, sections)
+    scratch = project.path.with_suffix(project.path.suffix + ".validate.tmp")
+    scratch.write_text(text, encoding="utf-8")
+    try:
+        load(scratch)
+    finally:
+        scratch.unlink(missing_ok=True)
+    atomic_write_text(project.path, text)
 
 
 def resolve(base: Path, value: str | Path) -> Path:
@@ -317,6 +368,29 @@ class Project:
             if values.get(key):
                 values[key] = str(self.resolve(values[key]))
         return str(script), values
+
+    def models(self) -> dict[str, dict]:
+        """Named model registry entries, validated and path-resolved.
+
+        `models` is open in DEFAULTS (see OPEN_SECTIONS) for the same reason
+        `pipeline` is: its per-entry shape doesn't fit a flat section. The one
+        rule this tool owns -- every entry needs `path` -- is checked here, at
+        the point of use, the same way pipeline() checks `script`.
+        """
+        entries = {}
+        for name, values in self.sections["models"].items():
+            if not isinstance(values, dict):
+                raise ConfigError(f"{self.path}: `models.{name}` must be a mapping")
+            strange = sorted(set(values) - set(MODEL_DEFAULTS))
+            if strange:
+                raise ConfigError(f"{self.path}: unknown `models.{name}` keys {strange}; "
+                                  f"known: {sorted(MODEL_DEFAULTS)}")
+            merged = {**MODEL_DEFAULTS, **values}
+            if not merged["path"]:
+                raise ConfigError(f"{self.path}: `models.{name}.path` is required")
+            merged["path"] = str(self.resolve(merged["path"]))
+            entries[name] = merged
+        return entries
 
     def summary(self) -> dict:
         """What `app.py` prints with no arguments: is this dataset ready, for what."""

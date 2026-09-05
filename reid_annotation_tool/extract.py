@@ -559,7 +559,7 @@ def extract(args) -> dict:
     if not videos:
         raise SystemExit("no videos matched")
     args.out.mkdir(parents=True, exist_ok=True)
-    pipeline = Pipeline.load(args.pipeline, args.pipeline_config)
+    pipeline = Pipeline.load(args.pipeline, args.pipeline_config, getattr(args, "registry", None))
     print(f"pipeline: {pipeline.path} ({pipeline.digest[:12]})", flush=True)
 
     # One calibration for the whole run: it is recorded in the manifest, so every
@@ -626,10 +626,14 @@ def extract(args) -> dict:
         },
         "pipeline": pipeline.describe(),
         "videos": manifest_videos, "counts": counts,
+        # `registry` is a live ModelRegistry, not a config value -- see
+        # contract.py's note on why it is a constructor argument rather than
+        # a config-dict key. Named entries it holds are already recorded via
+        # `pipeline.describe()["config"]` when a script declares them there.
         "arguments": {key: (sorted(str(item) for item in value) if isinstance(value, (set, frozenset))
                             else [str(item) for item in value] if isinstance(value, list)
                             else str(value) if isinstance(value, Path) else value)
-                      for key, value in vars(args).items()},
+                      for key, value in vars(args).items() if key != "registry"},
     }
     atomic_write_json(args.out / "manifest.json", manifest)
     print(json.dumps(counts, ensure_ascii=False), flush=True)

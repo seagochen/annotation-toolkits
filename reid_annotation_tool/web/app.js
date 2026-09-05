@@ -820,6 +820,251 @@ function closeConflictDetail() {
   $("#conflict-list").hidden = false;
 }
 
+/* --------------------------------------------------- config / models / jobs */
+
+// List-typed config values are edited as a comma-separated line rather than
+// raw JSON -- every list in the closed sections is short and either numeric
+// or short strings (class ids, split ratios, calibration points).
+function parseListInput(text) {
+  return text.split(",").map((token) => token.trim()).filter((token) => token !== "")
+    .map((token) => (token !== "" && Number.isFinite(Number(token)) ? Number(token) : token));
+}
+const formatListValue = (value) => (value || []).join(", ");
+
+function collectTypedValues(fields, inputs) {
+  const patch = {};
+  for (const [key, meta] of Object.entries(fields)) {
+    const input = inputs[key];
+    if (meta.type === "bool") patch[key] = input.checked;
+    else if (meta.type === "int") patch[key] = parseInt(input.value, 10) || 0;
+    else if (meta.type === "float") patch[key] = parseFloat(input.value) || 0;
+    else if (meta.type === "list") patch[key] = parseListInput(input.value);
+    else patch[key] = input.value;
+  }
+  return patch;
+}
+
+async function saveConfigPatch(section, patch, note) {
+  note.textContent = "保存中…";
+  note.className = "save-note";
+  try {
+    await api(`/api/config/${section}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    note.textContent = "已保存";
+    note.className = "save-note ok";
+  } catch (error) {
+    note.textContent = `保存失败：${error.message}`;
+    note.className = "save-note failed";
+  }
+}
+
+function typedSectionForm(section, fields, values) {
+  const inputs = {};
+  const grid = el("div", { class: "grid" });
+  for (const [key, meta] of Object.entries(fields)) {
+    const current = values[key] !== undefined ? values[key] : meta.default;
+    let input;
+    if (meta.type === "bool") {
+      input = el("input", { type: "checkbox", ...(current ? { checked: "checked" } : {}) });
+    } else if (meta.type === "int" || meta.type === "float") {
+      input = el("input", { type: "number", step: meta.type === "int" ? "1" : "any", value: current });
+    } else if (meta.type === "list") {
+      input = el("input", { type: "text", value: formatListValue(current) });
+    } else {
+      input = el("input", { type: "text", value: current ?? "" });
+    }
+    inputs[key] = input;
+    grid.append(el("div", { class: "config-field" }, [el("label", { text: key }), input]));
+  }
+  const note = el("span", { class: "save-note" });
+  return el("form", {
+    class: "config-section",
+    onsubmit: (event) => { event.preventDefault(); saveConfigPatch(section, collectTypedValues(fields, inputs), note); },
+  }, [
+    el("h3", { text: section }), grid,
+    el("div", { class: "save-row" }, [el("button", { type: "submit", text: "保存" }), note]),
+  ]);
+}
+
+// `pipeline` (and any future open section besides `models`, which gets its
+// own tab): the key set is private to the user's script, so this tool has no
+// schema to build a typed form from -- raw JSON is the fallback the README
+// already documents for custom pipelines.
+function rawSectionForm(section, values) {
+  const textarea = el("textarea", { class: "raw-json", rows: "5" });
+  textarea.value = JSON.stringify(values, null, 2);
+  const note = el("span", { class: "save-note" });
+  return el("form", {
+    class: "config-section",
+    onsubmit: (event) => {
+      event.preventDefault();
+      let patch;
+      try {
+        patch = JSON.parse(textarea.value);
+      } catch (error) {
+        note.textContent = `JSON 格式错误：${error.message}`;
+        note.className = "save-note failed";
+        return;
+      }
+      saveConfigPatch(section, patch, note);
+    },
+  }, [
+    el("h3", { text: `${section}（原始 JSON，本工具不校验这些键）` }), textarea,
+    el("div", { class: "save-row" }, [el("button", { type: "submit", text: "保存" }), note]),
+  ]);
+}
+
+async function loadConfig() {
+  try {
+    const [config, schema] = await Promise.all([api("/api/config"), api("/api/config/schema")]);
+    const container = $("#config-forms");
+    container.replaceChildren(...Object.entries(schema)
+      .filter(([section]) => section !== "models")
+      .map(([section, fields]) => (config.open_sections.includes(section)
+        ? rawSectionForm(section, config.sections[section] || {})
+        : typedSectionForm(section, fields, config.sections[section] || {}))));
+  } catch (error) {
+    $("#config-forms").replaceChildren(el("div", { class: "empty", text: `加载失败：${error.message}` }));
+  }
+}
+
+async function loadModels() {
+  try {
+    renderModels(await api("/api/models"));
+  } catch (error) {
+    $("#model-list").replaceChildren(el("div", { class: "empty", text: `加载失败：${error.message}` }));
+  }
+}
+
+function renderModels(models) {
+  const list = $("#model-list");
+  const names = Object.keys(models);
+  if (!names.length) {
+    list.replaceChildren(el("div", { class: "empty", text: "还没有命名模型。" }));
+    return;
+  }
+  list.replaceChildren(...names.map((name) => {
+    const entry = models[name];
+    return el("div", { class: "model-row" }, [
+      el("span", { class: "name", text: name }),
+      el("span", { class: "path", text: `${entry.path} · ${entry.framework} · ${entry.device}` }),
+      el("button", { text: "删除", onclick: () => removeModel(name) }),
+    ]);
+  }));
+}
+
+async function removeModel(name) {
+  if (!confirm(`删除模型 ${name}？只删除 models: 节里的这条记录，不会删除权重文件。`)) return;
+  try {
+    await api(`/api/models/${encodeURIComponent(name)}`, { method: "DELETE" });
+    await loadModels();
+  } catch (error) {
+    status(`删除失败：${error.message}`, true);
+  }
+}
+
+async function submitModel(event) {
+  event.preventDefault();
+  const name = $("#model-name").value.trim();
+  const path = $("#model-path").value.trim();
+  if (!name || !path) return;
+  try {
+    await api(`/api/models/${encodeURIComponent(name)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, device: $("#model-device").value }),
+    });
+    $("#model-add").reset();
+    await loadModels();
+  } catch (error) {
+    status(`保存失败：${error.message}`, true);
+  }
+}
+
+const JOB_STATUS_LABEL = { queued: "排队中", running: "运行中", done: "完成", failed: "失败" };
+let jobsPollTimer = null;
+let selectedJobId = null;
+let lastJobs = [];
+
+async function loadJobs() {
+  try {
+    const value = await api("/api/jobs");
+    lastJobs = value.jobs;
+    renderJobStageButtons(value.stages);
+    renderJobList(lastJobs);
+    const running = lastJobs.some((job) => job.status === "running" || job.status === "queued");
+    $("#job-badge").hidden = !running;
+    // The one deliberate polling loop in this app: a job's completion is an
+    // external async event with no user action to hang a refetch off, unlike
+    // every other interaction here (label save, verdict, config save).
+    if (running && !jobsPollTimer) jobsPollTimer = setInterval(loadJobs, 2000);
+    if (!running && jobsPollTimer) { clearInterval(jobsPollTimer); jobsPollTimer = null; }
+    if (selectedJobId) {
+      const job = lastJobs.find((item) => item.id === selectedJobId);
+      if (job) renderJobLog(job);
+    }
+  } catch (error) {
+    $("#job-list").replaceChildren(el("li", { text: `加载失败：${error.message}` }));
+  }
+}
+
+function renderJobStageButtons(stages) {
+  const container = $("#job-stage-buttons");
+  if (container.dataset.filled === JSON.stringify(stages)) return;
+  container.dataset.filled = JSON.stringify(stages);
+  container.replaceChildren(...stages.map((stageName) => el("button", {
+    text: `运行 ${stageName}`, onclick: () => startJob(stageName),
+  })));
+}
+
+function renderJobList(jobs) {
+  $("#job-list").replaceChildren(...jobs.slice().reverse().map((job) => el("li", {
+    class: job.id === selectedJobId ? "active" : "",
+    onclick: () => selectJob(job),
+  }, [
+    el("span", { class: "job-stage", text: job.stage }),
+    el("span", { class: `job-status ${job.status}`, text: JOB_STATUS_LABEL[job.status] || job.status }),
+    el("span", { class: "job-time", text: job.created_at || "" }),
+  ])));
+}
+
+function selectJob(job) {
+  selectedJobId = job.id;
+  renderJobList(lastJobs);
+  renderJobLog(job);
+}
+
+function renderJobLog(job) {
+  const lines = [
+    `# ${job.stage} · ${JOB_STATUS_LABEL[job.status] || job.status}`,
+    `created  ${job.created_at || "-"}`, `started  ${job.started_at || "-"}`,
+    `finished ${job.finished_at || "-"}`, "",
+  ];
+  if (job.error) lines.push(`错误：${job.error}`, "");
+  lines.push(...(job.log || []));
+  if (job.result) lines.push("", `结果：${JSON.stringify(job.result)}`);
+  $("#job-log").textContent = lines.join("\n");
+}
+
+async function startJob(stageName) {
+  const payload = {
+    dry_run: $("#job-dry-run").checked, apply: $("#job-apply").checked,
+    strict: $("#job-strict").checked,
+  };
+  try {
+    const job = await api(`/api/jobs/${stageName}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    selectedJobId = job.id;
+    status(`已启动任务 ${stageName} (${job.id})`);
+    await loadJobs();
+  } catch (error) {
+    status(`启动失败：${error.message}`, true);
+  }
+}
+
 /* ----------------------------------------------------------------- shell */
 
 function showTab(name) {
@@ -830,6 +1075,9 @@ function showTab(name) {
     panel.classList.toggle("active", panel.id === `tab-${name}`);
   }
   if (name === "conflicts") loadConflicts();
+  else if (name === "config") loadConfig();
+  else if (name === "models") loadModels();
+  else if (name === "jobs") loadJobs();
 }
 
 function zoom(path) {
@@ -851,6 +1099,7 @@ function bind() {
   });
   $("#load-more").addEventListener("click", () => loadQueue(false));
   $("#recheck").addEventListener("click", () => loadConflicts(true));
+  $("#model-add").addEventListener("submit", submitModel);
   $("#zoom").addEventListener("click", () => { $("#zoom").hidden = true; });
 
   document.addEventListener("keydown", (event) => {
@@ -885,6 +1134,9 @@ async function main() {
   } catch (error) {
     status(`加载失败：${error.message}`, true);
   }
+  // So the 任务 badge is accurate even before the reviewer ever opens that
+  // tab -- e.g. a training job kicked off earlier is still visibly running.
+  loadJobs().catch(() => {});
 }
 
 main();

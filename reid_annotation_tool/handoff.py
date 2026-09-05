@@ -133,9 +133,141 @@ def latest_run(project: Path, tasks: str, name: str) -> Path | None:
     return max(matches, key=lambda path: path.stat().st_mtime, default=None)
 
 
-def run(command: list[str], cwd: Path) -> int:
+def run(command: list[str], cwd: Path, sink=None) -> int:
+    """Run a subprocess, optionally streaming its combined output line by line.
+
+    ``sink`` is None for every existing caller (the CLI, watching its own
+    terminal), so `subprocess.run` is untouched there. The web job runner
+    passes a sink to capture output for a job whose console the browser
+    cannot see -- see reid_annotation_tool/jobs.py.
+    """
     print("running:", " ".join(command), flush=True)
-    return subprocess.run(command, cwd=str(cwd), check=False).returncode
+    if sink is None:
+        return subprocess.run(command, cwd=str(cwd), check=False).returncode
+    process = subprocess.Popen(command, cwd=str(cwd), stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, bufsize=1)
+    for line in process.stdout:
+        line = line.rstrip("\n")
+        print(line, flush=True)
+        sink(line)
+    process.stdout.close()
+    return process.wait()
+
+
+EVAL_OWNED = (("data", "reid_root"), ("data", "reid_csv"), ("checkpoint", "path"),
+              ("output", "project"), ("output", "name"), ("output", "metrics_path"))
+
+
+def build_eval_config(root: Path, args, project: Path, checkpoint: Path) -> dict:
+    """Same idea as `build_config`, plus the one thing training doesn't need:
+
+    where the checkpoint being measured lives. `output.metrics_path` exists
+    because, unlike a training run's weights directory, there is no natural
+    file name to glob for a metrics file -- the host tells the evaluator
+    exactly where to write it.
+    """
+    config: dict = {}
+    if args.base_config:
+        config = yaml.safe_load(Path(args.base_config).read_text(encoding="utf-8")) or {}
+        if not isinstance(config, dict):
+            raise SystemExit(f"{args.base_config}: base config must be a YAML mapping")
+    else:
+        print("note: evaluate.base_config is empty, so the evaluator receives only "
+              "the dataset/checkpoint/output paths and must supply its own defaults",
+              flush=True)
+
+    for override in args.set or []:
+        section, _, rest = override.partition(".")
+        key, _, value = rest.partition("=")
+        if not section or not key or "=" not in rest:
+            raise SystemExit(f"--set expects section.key=value, got {override!r}")
+        if (section, key) in EVAL_OWNED:
+            raise SystemExit(
+                f"{section}.{key} is derived from the project (dataset root, "
+                "evaluate.pairs/checkpoint/name) and cannot be overridden here")
+        config.setdefault(section, {})[key] = yaml.safe_load(value)
+
+    # Written last so no override can point the evaluator at another dataset
+    # or checkpoint.
+    config.setdefault("data", {}).update({"reid_root": str(root), "reid_csv": args.pairs})
+    config.setdefault("checkpoint", {}).update({"path": str(checkpoint)})
+    config.setdefault("output", {}).update({
+        "project": str(project), "name": args.name,
+        "metrics_path": str(project / "metrics.json"),
+    })
+    return config
+
+
+def evaluate(root: Path, args) -> dict:
+    """Hand a checkpoint and the protected test split to somebody else's
+    evaluator, and record what was fed -- the measurement-side twin of
+    `train()`. Nothing here computes a metric; this tool has no opinion about
+    what "good" means for someone else's model.
+    """
+    evaluator = Path(args.evaluator).resolve()
+    entry = evaluator / "scripts" / "evaluate.py"
+    if not entry.is_file():
+        raise SystemExit(f"evaluator entry point not found: {entry}")
+    checkpoint = Path(args.checkpoint)
+    if not checkpoint.is_file():
+        raise SystemExit(f"checkpoint not found: {checkpoint}")
+    pairs = root / args.pairs if not Path(args.pairs).is_absolute() else Path(args.pairs)
+    if not pairs.is_file():
+        raise SystemExit(f"pair CSV not found: {pairs}")
+
+    reviews = [root / path for path in (args.review or [])]
+    gate = conflict_engine.report(root, pairs, [path for path in reviews if path.is_file()])
+    if gate["errors"] and not args.allow_conflicts:
+        raise SystemExit(
+            f"refusing to evaluate: {gate['errors']} identity-logic conflicts\n"
+            + conflict_engine.main_text(gate)
+            + "\nresolve them in the review UI, or pass --allow-conflicts to override")
+    counts = split_label_counts(read_csv(pairs))
+    value = counts.get(args.split, {"positive": 0, "negative": 0})
+    if not value["positive"] or not value["negative"]:
+        raise SystemExit(
+            f"split={args.split} needs both positive and negative pairs "
+            f"(found {value}); the evaluator cannot compute ROC-AUC otherwise")
+
+    workspace = root / "evaluation" / args.name
+    workspace.mkdir(parents=True, exist_ok=True)
+    project = workspace / "runs"
+    config = build_eval_config(root, args, project, checkpoint)
+    config_path = workspace / "config.yaml"
+    config_path.write_text(yaml.dump(config, allow_unicode=True, sort_keys=False),
+                           encoding="utf-8")
+    print(f"config: {config_path}", flush=True)
+
+    command = [args.python, str(entry), "--config", str(config_path)]
+    manifest = {
+        "schema": 1, "created_at": datetime.now().astimezone().isoformat(),
+        "dataset_root": str(root), "pairs": str(pairs), "pairs_sha256": sha256(pairs),
+        "pair_counts": counts, "pair_provenance": pair_provenance(pairs),
+        "checkpoint": str(checkpoint), "checkpoint_sha256": sha256(checkpoint),
+        "conflict_gate": {k: gate[k] for k in
+                                                 ("errors", "warnings", "pending_reviews", "by_kind")},
+        "evaluator": str(evaluator), "evaluator_git": git_revision(evaluator),
+        "command": command, "config": config,
+    }
+    if args.dry_run:
+        manifest["status"] = "dry-run"
+        atomic_write_json(workspace / "eval-manifest.json", manifest)
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        return manifest
+
+    code = run(command, evaluator, getattr(args, "sink", None))
+    manifest["exit_code"] = code
+    manifest["status"] = "evaluated" if code == 0 else "failed"
+    metrics_path = project / "metrics.json"
+    if code == 0 and metrics_path.is_file():
+        try:
+            manifest["metrics"] = json.loads(metrics_path.read_text(encoding="utf-8"))
+            manifest["metrics_sha256"] = sha256(metrics_path)
+        except json.JSONDecodeError as error:
+            manifest["metrics_error"] = f"{metrics_path}: {error}"
+    atomic_write_json(workspace / "eval-manifest.json", manifest)
+    print(f"manifest: {workspace / 'eval-manifest.json'}", flush=True)
+    return manifest
 
 
 def train(root: Path, args) -> dict:
@@ -183,7 +315,7 @@ def train(root: Path, args) -> dict:
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
         return manifest
 
-    code = run(command, trainer)
+    code = run(command, trainer, getattr(args, "sink", None))
     manifest["exit_code"] = code
     manifest["status"] = "trained" if code == 0 else "failed"
     run_directory = latest_run(project, args.tasks, args.name)
@@ -201,7 +333,7 @@ def train(root: Path, args) -> dict:
             if args.tasks != "both":
                 export_command += ["--tasks", args.tasks]
             manifest["export_command"] = export_command
-            manifest["export_exit_code"] = run(export_command, trainer)
+            manifest["export_exit_code"] = run(export_command, trainer, getattr(args, "sink", None))
             onnx = best.with_suffix(".onnx")
             if onnx.is_file():
                 manifest["onnx"] = {"path": str(onnx), "sha256": sha256(onnx)}

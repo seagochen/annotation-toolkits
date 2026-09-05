@@ -106,6 +106,29 @@ def test_user_pipeline_script_resolves_from_the_project_file(tmp_path):
     assert project.pipeline() == (str((tmp_path / "pipeline.py").resolve()), {})
 
 
+def test_models_section_is_open_but_entries_are_validated_at_use(tmp_path):
+    project = project_config.load(write(
+        tmp_path, MINIMAL + "models:\n  detector:\n    path: ./weights.pt\n"))
+    assert project.models() == {
+        "detector": {"path": str((tmp_path / "weights.pt").resolve()),
+                     "framework": "pytorch", "device": "cpu", "kind": ""},
+    }
+
+
+def test_models_entry_needs_a_path(tmp_path):
+    project = project_config.load(write(
+        tmp_path, MINIMAL + "models:\n  detector:\n    device: cuda:0\n"))
+    with pytest.raises(ConfigError, match="`models.detector.path` is required"):
+        project.models()
+
+
+def test_models_entry_rejects_unknown_keys(tmp_path):
+    project = project_config.load(write(
+        tmp_path, MINIMAL + "models:\n  detector:\n    path: ./w.pt\n    epochs: 10\n"))
+    with pytest.raises(ConfigError, match="unknown `models.detector` keys"):
+        project.models()
+
+
 def test_one_run_overrides_land_on_a_known_key_only(tmp_path):
     project = project_config.load(write(tmp_path))
     project_config.apply_override(project.sections, "serve.port=9000")
@@ -183,3 +206,24 @@ def test_the_config_can_be_named_by_directory_or_environment(tmp_path, monkeypat
 def test_a_directory_without_a_config_says_so(tmp_path):
     with pytest.raises(ConfigError, match="no reid.yaml in"):
         project_config.find(tmp_path)
+
+
+def test_save_writes_a_validated_edit_and_preserves_the_raw_dataset_string(tmp_path):
+    project = project_config.load(write(tmp_path))
+    project.sections["crops"]["min_blur"] = 42.0
+    project_config.save(project, project.sections)
+    reloaded = project_config.load(project.path)
+    assert reloaded.sections["crops"]["min_blur"] == 42.0
+    # `dataset: ./ds` in MINIMAL is relative; save() must not silently rewrite
+    # it to the resolved absolute path.
+    assert "dataset: ./ds" in project.path.read_text(encoding="utf-8")
+
+
+def test_save_rejects_an_invalid_edit_without_touching_the_live_file(tmp_path):
+    project = project_config.load(write(tmp_path))
+    original = project.path.read_text(encoding="utf-8")
+    project.sections["crops"]["not_a_real_key"] = 1
+    with pytest.raises(ConfigError, match="unknown `crops` keys"):
+        project_config.save(project, project.sections)
+    assert project.path.read_text(encoding="utf-8") == original
+    assert not project.path.with_suffix(".yaml.validate.tmp").exists()

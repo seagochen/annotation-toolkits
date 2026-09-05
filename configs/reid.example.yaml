@@ -121,3 +121,23 @@ train:
     - model.backbone=osnet_x0_25
     - train.reid_epochs=300
     - advanced.device=cuda:0
+
+
+# ---------------------------------------------------------------- evaluate
+# train 的镜像：把 checkpoint 和受保护的 test 划分交给外部评估器，本工具不算指标。
+evaluate:
+  evaluator: /home/cxt/projects/mobilenet-yolopose-plugin-pytorch  # 同一个仓库常见
+  python: /home/cxt/miniconda3/envs/aigc/bin/python
+  checkpoint: /home/cxt/dataset/scene-reid/training/deploy/mobilenetv3-reid.pt
+  name: mobilenetv3_v1
+  split: test                    # 默认就是 test；val 也可以，显式给
+  base_config: ./my-evaluator-reid.yaml
+
+
+# ------------------------------------------------------------------ models
+# 给权重文件起名字，供 pipeline: 或自己的脚本按名字引用，避免同一份路径抄好几遍。
+# 目前只支持 pytorch（.pt）。
+# models:
+#   head_detector:
+#     path: ./weights/yolo11n.pt   # 相对路径按本文件所在目录解析
+#     device: cuda:0

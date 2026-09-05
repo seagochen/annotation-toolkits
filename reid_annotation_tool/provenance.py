@@ -160,7 +160,7 @@ class Provenance:
     refresh and the background recompute thread all see the same rebuild rule.
     """
 
-    def __init__(self, root: Path, candidates: Path, base_pairs: Path,
+    def __init__(self, root: Path, candidates: Path | None, base_pairs: Path,
                  reviews: list[Path]):
         self.root, self.candidates = root, candidates
         self.base_pairs, self.reviews = base_pairs, reviews
@@ -186,7 +186,9 @@ class Provenance:
         # provenance too, not only what lives under <root>/review/**.
         files: list[Path] = []
         seen: set[Path] = set()
-        for path in discovered + list(self.reviews) + [self.candidates]:
+        # self.candidates is None on a brand-new project (no live round yet;
+        # see server.serve's candidates=None path) -- nothing to add then.
+        for path in discovered + list(self.reviews) + ([self.candidates] if self.candidates else []):
             resolved = path.resolve()
             if resolved not in seen:
                 seen.add(resolved)
@@ -245,7 +247,9 @@ class Provenance:
         answers_by_pair: dict[tuple, list[dict]] = {}
         answers_by_candidate: dict[str, list[dict]] = {}
         live_pairs: dict[str, tuple] = {}
-        current = self.candidates.resolve()
+        # None on a brand-new project (no live round yet) -- nothing is the
+        # live queue then, so every file below reads as historical.
+        current = self.candidates.resolve() if self.candidates else None
         for path in files:
             if not path.is_file():
                 continue

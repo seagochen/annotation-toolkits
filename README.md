@@ -92,6 +92,23 @@ python app.py               # 起标注网页（默认动作，= serve）
 不做鉴权，不要直接暴露公网。需要长期后台运行时，用 `tmux` / `systemd` /
 `nohup` 之类的进程管理工具包一层即可——本工具自身不做 daemonize。
 
+网页除了"审核""冲突"，还有三个操作台标签，覆盖配置、模型、跑阶段这几件事，
+尽量不用再手改 YAML 或敲 CLI 参数：
+
+| 标签 | 做什么 |
+| --- | --- |
+| 配置 | 按节编辑 `reid.yaml`：封闭节（`extract`/`crops`/`mine`/`train`/…）是按
+  `DEFAULTS` 生成的表单，写错键会拒绝且不改动原文件；`pipeline` 这类开放节退化成
+  原始 JSON 编辑（保存会重写整份文件，注释和手写格式会丢失，网页会提示）。 |
+| 模型 | 增删 `models:` 节里的命名权重（见"命名模型"一节），不用到处手抄同一个路径。 |
+| 任务 | 后台跑 `extract` / `mine` / `check` / `finalize` / `train` / `evaluate` /
+  `purge-domain`，实时看日志，历史任务记录在 `<dataset>/.jobs/`。同一时间只跑
+  一个任务——两个 `extract` 同时跑对同一个数据集没有意义，日志也会串在一起。 |
+
+`python app.py`（= `serve`）在全新项目（还没跑过 `extract`/`mine`）上也能直接起：
+"审核"标签会显示暂无候选，但配置/模型/任务三个标签照常可用，可以直接在"任务"
+标签里跑第一次 `extract`。
+
 ### 命令一览
 
 | 命令 | 作用 |
@@ -103,12 +120,13 @@ python app.py               # 起标注网页（默认动作，= serve）
 | `python app.py check` | 逻辑冲突检测（有 error 返回 1） |
 | `python app.py finalize` | 把已审核结论烤进新的 pairs 清单 |
 | `python app.py train` | 把数据集交给外部训练器（本工具不训练模型） |
+| `python app.py evaluate` | 把 checkpoint 交给外部评估器（本工具不计算指标） |
 | `python app.py purge-domain` | 归档跨天 / 跨相机关系 |
 
 单次覆盖配置用 `--set 节.键=值`，例如 `python app.py --set serve.port=9000`。
 
-完整工作流是下面的 1-5 节，按顺序跑一遍：接入流水线 → 抽取数据集 → 挖掘并标注
-→ 冲突检测 → 汇总并重新训练。
+完整工作流是下面的 1-6 节，按顺序跑一遍：接入流水线 → 抽取数据集 → 挖掘并标注
+→ 冲突检测 → 汇总并重新训练 → 评估训练产出。
 
 ## 1. 接入你自己的流水线
 
@@ -277,6 +295,39 @@ python app.py             # 起网页，开始标注
   录像前缀，所以 `track_id` 跨录像重复本身不是问题；问题是上一段录像遗留的轨迹状态
   会把新录像开头的框错误地续到旧轨迹上。同一段录像内部跟踪器回收 id 时本工具会加
   代号后缀（`..._t00007g2`），保证两个目标不会共用一个 `person_id`。
+
+### 命名模型：`models:` 节
+
+多个脚本、多次训练/评估经常要指向同一份权重。与其在 `pipeline:`、`train.base_config`、
+自己的代码里各抄一遍路径，可以在 `models:` 节里给它起个名字：
+
+```yaml
+models:
+  head_detector:
+    path: ./weights/yolo11n.pt   # 相对路径按本文件所在目录解析
+    framework: pytorch           # 目前只支持 pytorch（.pt），默认值
+    device: cpu
+```
+
+随包的 `ultralytics` 参考流水线已经支持把 `pipeline.detector` 写成注册表里的名字
+而不是字面路径：
+
+```yaml
+pipeline:
+  script: ultralytics
+  detector: head_detector        # 等价于直接写 ./weights/yolo11n.pt
+```
+
+自己写脚本的话，`process_frame` 声明第四个参数就能拿到这个注册表（`open_source` /
+`detect_crops` 同理声明多一个参数即可）；不声明的脚本完全不受影响，本工具不会塞给它：
+
+```python
+def process_frame(image, source, config, registry) -> list[Observation]:
+    weights = registry.resolve_path("head_detector")   # 已解析好的绝对路径
+```
+
+`models` 和 `pipeline` 一样是开放节（本工具不知道你的模型需要哪些参数），但每条
+条目的 `path` / `framework` / `device` / `kind` 四个键会被校验，写错会直接报错。
 
 ## 2. 从录像产出数据集
 
@@ -570,6 +621,48 @@ label_of = {row["img_path"]: graph.find(row["person_id"])
 
 导出的 ONNX 可以直接写回 `mine.reid_onnx`，形成闭环。
 
+## 6. 评估已训练的 checkpoint
+
+`train` 的镜像：本工具不计算任何指标，只负责把 checkpoint 和受保护的测试集配对清单
+交给外部评估器，并记录喂给它的到底是什么。
+
+```yaml
+evaluate:
+  evaluator: /path/to/my-evaluator   # 目录下要有 scripts/evaluate.py
+  python: /path/to/env/bin/python
+  checkpoint: ./training/deploy/mobilenetv3-reid.pt
+  name: mobilenetv3_v1
+  split: test                        # 默认就是 test；val 也可以，显式给
+  base_config: ./my-evaluator-reid.yaml
+```
+
+```bash
+python app.py evaluate
+```
+
+你的评估器需要满足和训练器同一套约定：
+
+- `evaluator` 目录下有 `scripts/evaluate.py`，接受 `--config <yaml>`；
+- 从配置里读 `data.reid_root` / `data.reid_csv`（测试集配对清单）和
+  `checkpoint.path`，自己去读 CSV、加载 checkpoint、跑推理；
+- 算完指标后写到配置里 `output.metrics_path` 指的那个 JSON 文件——本工具不猜测
+  文件名，直接告诉评估器该写在哪。
+
+那份 `config.yaml` 同样是**你评估器自己的 YAML**，本工具照抄一遍，只补上它独有的
+六个键：`data.reid_root`、`data.reid_csv`、`checkpoint.path`、`output.project`、
+`output.name`、`output.metrics_path`。⚠️ 这六个键同样不属于 `evaluate:` 节本身，也
+**不能**用 `evaluate.set` 覆盖——道理与 `train.set` 一样：一次评估如果能被悄悄指向
+别的数据集或别的 checkpoint，整条追溯链就是假的。
+
+`evaluate` 在跑之前会：
+
+1. 跑一遍冲突检测，有 error 就拒绝（`evaluate.allow_conflicts: true` 可强制覆盖）；
+2. 校验 `evaluate.split`（默认 `test`）同时含有正负样本，否则算不出 ROC-AUC；
+3. 生成评估器配置到 `<root>/evaluation/<name>/config.yaml`；
+4. 跑完写 `eval-manifest.json`：pairs 的 sha256、checkpoint 的 sha256、冲突门禁结果、
+   评估器 git revision，以及 `output.metrics_path` 里的内容（原样嵌入 `metrics` 字段）——
+   任何一次评估都能追溯回它测的是哪个 checkpoint、用的哪份人工标注。
+
 ## 配置文件
 
 `reid.yaml`（`python app.py init` 生成，完整示例见 `configs/reid.example.yaml`）
@@ -582,11 +675,13 @@ label_of = {row["img_path"]: graph.find(row["person_id"])
 | `extract` / `splits` | 用哪些录像、抽多密、时间与划分怎么读 |
 | `projection` | 相机标定（头→身体裁剪几何） |
 | `crops` / `pairs` | 什么样的裁剪可信、什么样的两张裁剪算证据 |
-| `mine` / `serve` / `train` | 候选排序、网页、交给外部训练器（只有接口，没有它的超参） |
+| `mine` / `serve` / `train` / `evaluate` | 候选排序、网页、交给外部训练器/评估器（只有接口，没有超参或指标定义） |
+| `models` | 给权重文件起名字，供 `pipeline:` 或你自己的脚本按名字引用 |
 
-除 `pipeline` 外，所有节的键都对照 `reid_annotation_tool/config.py` 的 `DEFAULTS`
-校验：**写错一个键会直接报错，而不是被静默忽略** —— 一个被无视的阈值笔误正是那种
-会安静产出错误数据集的错误。默认值就是本工具历史上的 CLI 默认值。
+除 `pipeline` / `models` 外，所有节的键都对照 `reid_annotation_tool/config.py` 的
+`DEFAULTS` 校验：**写错一个键会直接报错，而不是被静默忽略** —— 一个被无视的阈值
+笔误正是那种会安静产出错误数据集的错误。默认值就是本工具历史上的 CLI 默认值。
+`models` 本身开放（条目形状因人而异），但每条条目内部的四个键仍会校验，见上一节。
 
 单次覆盖：`python app.py extract --set splits.split=val --set crops.min_blur=40`。
 

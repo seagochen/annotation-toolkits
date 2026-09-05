@@ -22,6 +22,19 @@ and may additionally define::
     close_source(source, config)                # recording finished
     detect_crops(images, config) -> list[list[Observation]]
 
+A script that wants named models from the project's ``models:`` section
+(see ``reid_annotation_tool.registry.ModelRegistry``) declares a fourth
+parameter and receives it as a keyword::
+
+    def process_frame(image, source, config, registry) -> list[Observation]:
+        weights = registry.resolve_path("detector")
+
+The registry is entirely optional: a plain 3-parameter ``process_frame``
+keeps working exactly as before, unchanged. It is passed as a constructor
+argument, never folded into ``config`` -- ``Pipeline.describe()`` writes
+``config`` straight into ``manifest.json``, and a live registry object
+would break that JSON serialization the moment any pipeline used it.
+
 ``detect_crops`` is the crop firewall's second pass: the host hands back the
 finished crops and the script re-runs its detector on them. The host, not the
 script, decides what counts as contamination — that is dataset policy, and it
@@ -35,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import inspect
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -120,9 +134,12 @@ class Pipeline:
     module: object
     config: dict = field(default_factory=dict)
     digest: str = ""
+    registry: object = None
+    _process_frame_wants_registry: bool = False
 
     @classmethod
-    def load(cls, reference: str, config: dict | None = None) -> "Pipeline":
+    def load(cls, reference: str, config: dict | None = None, registry: object = None,
+             ) -> "Pipeline":
         path = resolve(reference)
         name = f"reid_pipeline_{path.stem}"
         spec = importlib.util.spec_from_file_location(name, path)
@@ -134,24 +151,43 @@ class Pipeline:
             spec.loader.exec_module(module)
         except Exception as error:                        # noqa: BLE001 - reported as-is
             raise PipelineError(f"{path} failed to import: {error}") from error
-        if not callable(getattr(module, REQUIRED_HOOK, None)):
+        hook = getattr(module, REQUIRED_HOOK, None)
+        if not callable(hook):
             raise PipelineError(
                 f"{path} defines no {REQUIRED_HOOK}(image, source, config); "
                 "see reid_annotation_tool/pipelines/ for reference scripts")
         return cls(path, module, dict(config or {}),
-                   hashlib.sha256(path.read_bytes()).hexdigest())
+                   hashlib.sha256(path.read_bytes()).hexdigest(), registry,
+                   cls._wants_registry(hook, 3))
 
     def _hook(self, name: str):
         hook = getattr(self.module, name, None)
         return hook if callable(hook) else None
 
+    @staticmethod
+    def _wants_registry(hook, fixed_arity: int) -> bool:
+        return len(inspect.signature(hook).parameters) > fixed_arity
+
     def process_frame(self, image: np.ndarray, source: Source) -> list[Observation]:
-        found = self.module.process_frame(image, source, self.config)
+        # Precomputed once at load() rather than inspected here: this runs
+        # every frame, unlike the rare hooks below.
+        if self._process_frame_wants_registry:
+            found = self.module.process_frame(image, source, self.config, registry=self.registry)
+        else:
+            found = self.module.process_frame(image, source, self.config)
         return validate(found, self.path)
 
     def open_source(self, source: Source) -> None:
+        """Runs once per recording -- where the bundled ultralytics pipeline
+        actually builds its detector (see its module docstring), so a
+        registry-aware detector path has to reach this hook too, not only
+        process_frame."""
         hook = self._hook("open_source")
-        if hook is not None:
+        if hook is None:
+            return
+        if self._wants_registry(hook, 2):
+            hook(source, self.config, registry=self.registry)
+        else:
             hook(source, self.config)
 
     def close_source(self, source: Source) -> None:
@@ -169,7 +205,9 @@ class Pipeline:
         hook = self._hook("detect_crops")
         if hook is None:
             return None
-        return [validate(found, self.path) for found in hook(images, self.config)]
+        found_list = (hook(images, self.config, registry=self.registry)
+                     if self._wants_registry(hook, 2) else hook(images, self.config))
+        return [validate(found, self.path) for found in found_list]
 
     def describe(self) -> dict:
         """Manifest entry: which script, which bytes, which hooks it provided."""

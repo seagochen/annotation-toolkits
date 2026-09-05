@@ -1,10 +1,11 @@
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from reid_annotation_tool.handoff import (build_config, latest_run, pair_provenance,
-                                          train, validate_pairs)
+                                          run, train, validate_pairs)
 
 from conftest import CANDIDATE_FIELDS, candidate, pair, write_csv
 from reid_annotation_tool.core import PAIR_FIELDS
@@ -156,3 +157,17 @@ def test_training_refuses_a_dataset_that_contradicts_itself(dataset, tmp_path):
 def test_missing_trainer_is_reported(dataset):
     with pytest.raises(SystemExit, match="trainer entry point"):
         train(dataset, options(trainer=Path("/nonexistent")))
+
+
+def test_run_without_a_sink_behaves_exactly_as_before(tmp_path):
+    assert run([sys.executable, "-c", "print('hi')"], tmp_path) == 0
+
+
+def test_run_with_a_sink_streams_combined_output_line_by_line(tmp_path):
+    lines = []
+    code = run([sys.executable, "-c",
+               "import sys; print('out', flush=True); "
+               "print('err', file=sys.stderr, flush=True)"],
+              tmp_path, sink=lines.append)
+    assert code == 0
+    assert lines == ["out", "err"]

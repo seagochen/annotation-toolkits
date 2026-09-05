@@ -16,6 +16,9 @@
   <nav class="tabs">
     <button class="tab active" data-tab="review">审核</button>
     <button class="tab" data-tab="conflicts">冲突 <span id="conflict-badge" class="badge">0</span></button>
+    <button class="tab" data-tab="config">配置</button>
+    <button class="tab" data-tab="models">模型</button>
+    <button class="tab" data-tab="jobs">任务 <span id="job-badge" class="badge" hidden>●</span></button>
     <button class="tab" data-tab="help">帮助</button>
   </nav>
   <div class="status" id="status">就绪</div>
@@ -53,6 +56,37 @@
     <div id="conflict-list"></div>
     <!-- Full-chain expansion of one conflict; filled and shown by showConflictDetail(). -->
     <div id="conflict-detail" hidden></div>
+  </section>
+
+  <section id="tab-config" class="tab-panel">
+    <p class="panel-note">按节保存；每节独立校验，写错键会拒绝且不动原文件。
+      保存会重写整份 <code>reid.yaml</code>，注释和未出现在这里的手写格式会丢失。</p>
+    <div id="config-forms"></div>
+  </section>
+
+  <section id="tab-models" class="tab-panel">
+    <p class="panel-note">给 <code>.pt</code> 权重起个名字，<code>pipeline:</code> 或自己的脚本可以按名字引用，
+      而不必到处抄同一个路径。</p>
+    <div id="model-list"></div>
+    <form id="model-add" class="inline-form">
+      <input id="model-name" placeholder="名字，如 head_detector" required>
+      <input id="model-path" placeholder="./weights/yolo11n.pt" required>
+      <select id="model-device"><option value="cpu">cpu</option><option value="cuda:0">cuda:0</option></select>
+      <button type="submit">添加 / 更新</button>
+    </form>
+  </section>
+
+  <section id="tab-jobs" class="tab-panel">
+    <div class="job-toolbar">
+      <span id="job-stage-buttons"></span>
+      <label><input type="checkbox" id="job-dry-run"> dry-run（train/evaluate）</label>
+      <label><input type="checkbox" id="job-apply"> apply（purge-domain）</label>
+      <label><input type="checkbox" id="job-strict"> strict（check）</label>
+    </div>
+    <div class="jobs-layout">
+      <ul id="job-list"></ul>
+      <pre id="job-log" class="job-log">选择左侧一个任务查看日志。</pre>
+    </div>
   </section>
 
   <section id="tab-help" class="tab-panel">
