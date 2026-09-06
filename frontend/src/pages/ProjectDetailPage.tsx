@@ -71,6 +71,11 @@ export function ProjectDetailPage() {
           开始审核候选 →
         </Link>
       )}
+      {project.task_type === "classification" && project.status === "reviewing" && (
+        <Link className="primary-link" to={`/projects/${project.id}/classify`}>
+          开始图像分类 →
+        </Link>
+      )}
       <section className="detail-grid">
         <article className="detail-card">
           <h2>本地数据</h2>

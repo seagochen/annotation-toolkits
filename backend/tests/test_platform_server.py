@@ -66,6 +66,28 @@ def make_review_registry(tmp_path: Path) -> tuple[Path, Path]:
     return registry, review
 
 
+def make_classification_registry(tmp_path: Path, mode: str = "single") -> Path:
+    dataset = tmp_path / "classification-images"
+    dataset.mkdir()
+    (dataset / "sample.jpg").write_bytes(b"image")
+    (tmp_path / "classification.yaml").write_text(
+        "dataset: ./classification-images\n"
+        "labels: [indoor, outdoor]\n"
+        f"mode: {mode}\n",
+        encoding="utf-8",
+    )
+    registry = tmp_path / "classification-projects.yaml"
+    registry.write_text(
+        "projects:\n"
+        "  - id: scenes\n"
+        "    name: Scenes\n"
+        "    task_type: classification\n"
+        "    config: ./classification.yaml\n",
+        encoding="utf-8",
+    )
+    return registry
+
+
 def request(app, method: str, path: str, **kwargs) -> httpx.Response:
     async def send() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
@@ -468,3 +490,41 @@ def test_review_to_finalize_artifacts_match_cli(tmp_path):
 
     assert reid_app.main(["finalize", "--config", str(tmp_path / "reid.yaml")]) == 0
     assert {path.name: path.read_bytes() for path in artifacts} == api_outputs
+
+
+def test_classification_project_uses_generic_queue_and_annotation_api(tmp_path):
+    app = create_app(make_classification_registry(tmp_path))
+    detail = request(app, "GET", "/api/projects/scenes")
+    assert detail.status_code == 200
+    assert detail.json()["summary"]["mode"] == "single"
+    assert detail.json()["summary"]["labels"] == ["indoor", "outdoor"]
+
+    queue = request(app, "GET", "/api/projects/scenes/queue?status=pending")
+    item = queue.json()["items"][0]
+    assert item["image_path"] == "sample.jpg"
+    image = request(app, "GET", "/api/projects/scenes/files/sample.jpg")
+    assert image.content == b"image"
+
+    invalid = request(
+        app,
+        "POST",
+        "/api/projects/scenes/annotations",
+        json={"item_id": item["item_id"], "result": {"labels": ["unknown"]}},
+    )
+    assert invalid.status_code == 422
+
+    saved = request(
+        app,
+        "POST",
+        "/api/projects/scenes/annotations",
+        json={"item_id": item["item_id"], "result": {"labels": ["outdoor"]}},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["status"]["state"] == "reviewed"
+    assert request(
+        app, "GET", "/api/projects/scenes/queue?status=pending"
+    ).json()["total"] == 0
+
+    unsupported = request(app, "GET", "/api/projects/scenes/actions")
+    assert unsupported.status_code == 404
+    assert unsupported.json()["detail"]["code"] == "actions_not_supported"

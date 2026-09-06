@@ -4,3 +4,7 @@ projects:
     name: Scene ReID
     task_type: reid
     config: ./reid.example.yaml
+  - id: scene-classification
+    name: Scene Classification
+    task_type: classification
+    config: ./classification.example.yaml

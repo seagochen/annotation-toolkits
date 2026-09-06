@@ -2,6 +2,7 @@ import { Link, Route, Switch } from "wouter";
 
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { ProjectListPage } from "./pages/ProjectListPage";
+import { ClassificationReviewPage } from "./tasks/classification/ClassificationReviewPage";
 import { ReIDReviewPage } from "./tasks/reid/ReIDReviewPage";
 
 function NotFoundPage() {
@@ -32,6 +33,7 @@ export function App() {
       <main>
         <Switch>
           <Route path="/" component={ProjectListPage} />
+          <Route path="/projects/:projectId/classify" component={ClassificationReviewPage} />
           <Route path="/projects/:projectId/review" component={ReIDReviewPage} />
           <Route path="/projects/:projectId" component={ProjectDetailPage} />
           <Route component={NotFoundPage} />

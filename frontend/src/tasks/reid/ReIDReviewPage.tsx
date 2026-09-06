@@ -113,7 +113,10 @@ export function ReIDReviewPage() {
       setSubmitting(verdict);
       setSubmitFailure(null);
       try {
-        await submitAnnotation(projectId, text(item, "candidate_id"), verdict, notes);
+        await submitAnnotation(projectId, text(item, "candidate_id"), {
+          label: verdict,
+          notes,
+        });
         const queue = await getQueue(projectId);
         setState((current) =>
           current.kind === "ready" ? { ...current, queue } : current,

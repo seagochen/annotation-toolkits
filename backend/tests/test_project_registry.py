@@ -81,7 +81,7 @@ def test_directory_registry_uses_each_entry_as_its_relative_path_base(tmp_path):
             + entry("same", "Second", "./two.yaml"),
             "duplicate project id",
         ),
-        (entry("other", "Other", "./one.yaml", "classification"), "unknown task type"),
+        (entry("other", "Other", "./one.yaml", "not-registered"), "unknown task type"),
         (entry("missing", "Missing", "./absent.yaml"), "project config not found"),
     ],
 )

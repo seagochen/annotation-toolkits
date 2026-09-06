@@ -79,14 +79,13 @@ export async function getQueue(
 export async function submitAnnotation(
   projectId: string,
   itemId: string,
-  label: "same" | "different" | "unclear",
-  notes: string,
+  result: Record<string, unknown>,
 ): Promise<AnnotationResponse> {
   const { data, error, response } = await client.POST(
     "/api/projects/{project_id}/annotations",
     {
       params: { path: { project_id: projectId } },
-      body: { item_id: itemId, result: { label, notes } },
+      body: { item_id: itemId, result },
     },
   );
   if (!response.ok || !data) {

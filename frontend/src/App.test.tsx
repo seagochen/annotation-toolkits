@@ -307,4 +307,90 @@ describe("project pages", () => {
     renderAt("/projects/lobby/review");
     expect(await screen.findByRole("alert")).toHaveTextContent("queue unavailable");
   });
+
+  it("completes a single-label classification queue", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "scenes",
+          name: "Scenes",
+          task_type: "classification",
+          root: "/data/images",
+          status: "reviewing",
+          summary: { mode: "single", labels: ["indoor", "outdoor"] },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 1,
+          offset: 0,
+          limit: 1,
+          items: [{ item_id: "i1", image_path: "street.jpg", labels: [] }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          item: { item_id: "i1", image_path: "street.jpg", labels: ["outdoor"] },
+          status: { state: "reviewed", details: { pending: 0 } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({ total: 0, offset: 0, limit: 1, items: [] }),
+      );
+
+    renderAt("/projects/scenes/classify");
+    const outdoor = await screen.findByRole("radio", { name: "outdoor" });
+    const submit = screen.getByRole("button", { name: "保存并继续" });
+    expect(submit).toBeDisabled();
+    fireEvent.click(outdoor);
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+
+    expect(await screen.findByRole("heading", { name: "图像分类已完成" })).toBeVisible();
+    const request = fetchMock.mock.calls[2][0] as Request;
+    await expect(request.clone().json()).resolves.toEqual({
+      item_id: "i1",
+      result: { labels: ["outdoor"] },
+    });
+  });
+
+  it("allows multiple labels and retains them when saving fails", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "objects",
+          name: "Objects",
+          task_type: "classification",
+          root: "/data/images",
+          status: "reviewing",
+          summary: { mode: "multi", labels: ["person", "bag"] },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 1,
+          offset: 0,
+          limit: 1,
+          items: [{ item_id: "i2", image_path: "person.jpg", labels: [] }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(
+          { detail: { code: "task_operation_error", message: "disk full" } },
+          422,
+        ),
+      );
+
+    renderAt("/projects/objects/classify");
+    const person = await screen.findByRole("checkbox", { name: "person" });
+    const bag = screen.getByRole("checkbox", { name: "bag" });
+    fireEvent.click(person);
+    fireEvent.click(bag);
+    fireEvent.click(screen.getByRole("button", { name: "保存并继续" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
+    expect(person).toBeChecked();
+    expect(bag).toBeChecked();
+    expect(screen.getByRole("button", { name: "重试保存" })).toBeVisible();
+  });
 });
