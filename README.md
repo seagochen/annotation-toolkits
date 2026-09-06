@@ -20,7 +20,7 @@ flowchart LR
     Future --> Files
 ```
 
-React 前端和统一 API 尚在建设中；现阶段 ReID 继续通过原有本地 Web 工作台运行。
+React 项目导航和统一 API 已可用；现阶段 ReID 标注仍继续通过原有本地 Web 工作台运行。
 
 ## 功能状态
 
@@ -28,10 +28,11 @@ React 前端和统一 API 尚在建设中；现阶段 ReID 继续通过原有本
 | --- | --- |
 | ReID 提取、挖掘、审核与冲突检测 | 可用 |
 | 原子写入、审计与训练清单 | 可用 |
-| 后端/前端目录边界 | 建设中 |
+| 后端/前端目录边界 | 可用 |
 | 多项目 Python 注册表 | 可用 |
 | 多项目统一 HTTP API | 可用（项目查询） |
-| React 标注界面 | 规划中 |
+| React 项目列表和详情 | 可用 |
+| React 任务标注界面 | 规划中 |
 | 分类、检测、分割、文本、描述和深度任务 | 规划中 |
 
 ## 运行要求
@@ -65,6 +66,17 @@ uvicorn annotation_platform.server:app --app-dir backend --reload
 CORS 默认只允许 `http://localhost:5173` 和 `http://127.0.0.1:5173`；需要其他明确来源时，
 通过逗号分隔的 `ANNOTATION_CORS_ORIGINS` 配置，不接受 `*`。
 
+另开终端启动 React 项目导航：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+浏览器访问 `http://127.0.0.1:5173`；开发服务器会把 `/api` 请求代理到上述 FastAPI
+服务。前端的完整开发、类型生成与验证命令见 [`frontend/README.md`](frontend/README.md)。
+
 需要执行视频抽取和候选挖掘时，安装完整可选依赖：
 
 ```bash
@@ -78,7 +90,7 @@ ReID 的数据约束、配置、流水线接入和完整操作说明见
 
 ```text
 backend/   Python 后端、现有 ReID 工作台、测试、配置和参考流水线
-frontend/  React/TypeScript 前端（待建立）
+frontend/  React/TypeScript 项目导航与后续任务工作台
 ```
 
 项目路线与未完成工作以 GitHub Issues 为准。

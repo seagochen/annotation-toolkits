@@ -1,0 +1,34 @@
+{
+  "name": "annotation-toolkits-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "generate:api": "python3 scripts/export_openapi.py && openapi-typescript src/api/openapi.json -o src/api/schema.d.ts",
+    "typecheck": "npm run generate:api && tsc --noEmit",
+    "test": "npm run generate:api && vitest run",
+    "build": "npm run generate:api && tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "wouter": "3.11.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.2.0",
+    "@types/react": "18.3.18",
+    "@types/react-dom": "18.3.5",
+    "@vitejs/plugin-react": "4.7.0",
+    "jsdom": "25.0.1",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.7.3",
+    "vite": "6.4.3",
+    "vitest": "3.2.7"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
