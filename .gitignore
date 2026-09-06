@@ -32,6 +32,11 @@ reid-annotation.yaml
 .DS_Store
 Thumbs.db
 
+# Local AI-assistant tool config (e.g. skill symlinks pointing outside the
+# repo to a machine-local skills manager) -- not portable, not shared.
+.claude/
+.codex/
+
 # Site-specific pipelines contain local dataset/model/device paths. Keep only
 # the portable Ultralytics example as a reviewed, versioned starting point.
 /backend/pipeline/*
