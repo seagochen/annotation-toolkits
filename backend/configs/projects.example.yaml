@@ -1,0 +1,6 @@
+# Platform registry. Paths are relative to this file, never to the shell cwd.
+projects:
+  - id: scene-reid
+    name: Scene ReID
+    task_type: reid
+    config: ./reid.example.yaml

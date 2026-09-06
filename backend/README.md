@@ -669,6 +669,22 @@ python app.py evaluate
 
 ## 配置文件
 
+平台可通过 `projects.yaml` 列出多个本地项目；注册表只保存平台元数据和项目配置路径，
+数据集根目录及任务参数仍由各自的 `reid.yaml` 管理：
+
+```yaml
+projects:
+  - id: scene-reid
+    name: Scene ReID
+    task_type: reid
+    config: ./scene/reid.yaml
+```
+
+注册表路径按 `projects.yaml` 所在目录解析。也可以传入一个目录，将其中每个
+`*.yaml`/`*.yml` 视为单独的项目条目。Python 层使用
+`ProjectRegistry.load(path).list_projects()` 和 `load_project(id)`；HTTP 接口由后续
+Issue 提供。完整示例见 `configs/projects.example.yaml`。
+
 `reid.yaml`（`python app.py init` 生成，完整示例见 `configs/reid.example.yaml`）
 按"谁拥有这个决定"分节：
 
