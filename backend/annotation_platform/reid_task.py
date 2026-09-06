@@ -6,7 +6,7 @@ from pathlib import Path
 
 from reid_annotation_tool import config as reid_config
 from reid_annotation_tool.app import latest_pairs
-from reid_annotation_tool.server import Store
+from reid_annotation_tool.server import LabelConflictError, Store
 
 from .task_types import (
     ExportRequest,
@@ -15,6 +15,7 @@ from .task_types import (
     QueueRequest,
     Submission,
     SubmissionResult,
+    TaskConflictError,
     TaskOperationError,
     TaskProject,
     TaskStatus,
@@ -77,11 +78,19 @@ class ReIDTaskType:
         if live_round is None:
             raise TaskOperationError("reid project has no review queue")
         notes = submission.result.get("notes")
-        item = self._store(reid_project).set_label(
-            submission.item_id,
-            str(label),
-            None if notes is None else str(notes),
-        )
+        try:
+            item = self._store(reid_project).set_label(
+                submission.item_id,
+                str(label),
+                None if notes is None else str(notes),
+                overwrite=False,
+            )
+        except LabelConflictError as error:
+            raise TaskConflictError(str(error)) from error
+        except OSError as error:
+            raise TaskOperationError(
+                f"cannot persist queue item {submission.item_id!r}: {error}"
+            ) from error
         if item is None:
             raise TaskOperationError(f"unknown queue item {submission.item_id!r}")
         return SubmissionResult(item=item, status=self.status(project))

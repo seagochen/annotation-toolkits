@@ -46,6 +46,12 @@ class TaskOperationError(TaskTypeError):
     code = "task_operation_error"
 
 
+class TaskConflictError(TaskOperationError):
+    """A submission would overwrite a decision made from stale client state."""
+
+    code = "task_conflict"
+
+
 @dataclass(frozen=True)
 class TaskProject:
     """Task-neutral paths plus the module-owned loaded configuration value."""

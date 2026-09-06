@@ -65,6 +65,11 @@ export function ProjectDetailPage() {
         </div>
         <span className={`status status-${project.status}`}>{project.status}</span>
       </section>
+      {project.task_type === "reid" && project.status === "reviewing" && (
+        <Link className="primary-link" to={`/projects/${project.id}/review`}>
+          开始审核候选 →
+        </Link>
+      )}
       <section className="detail-grid">
         <article className="detail-card">
           <h2>本地数据</h2>

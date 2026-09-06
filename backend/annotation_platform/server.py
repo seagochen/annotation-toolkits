@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import mimetypes
 import os
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from reid_annotation_tool.project_registry import ProjectRegistry, RegistryError
 
-from .task_types import TaskTypeRegistry, default_task_types
+from .task_types import (
+    QueueRequest,
+    Submission,
+    TaskConflictError,
+    TaskOperationError,
+    TaskTypeRegistry,
+    default_task_types,
+)
 
 DEFAULT_REGISTRY_PATH = "projects.yaml"
 DEFAULT_CORS_ORIGINS = (
@@ -40,6 +49,28 @@ class ErrorDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: ErrorDetail
+
+
+class QueueResponse(BaseModel):
+    total: int
+    offset: int
+    limit: int
+    items: list[dict[str, object]]
+
+
+class AnnotationRequest(BaseModel):
+    item_id: str = Field(min_length=1)
+    result: dict[str, object]
+
+
+class TaskStatusResponse(BaseModel):
+    state: str
+    details: dict[str, object]
+
+
+class AnnotationResponse(BaseModel):
+    item: dict[str, object]
+    status: TaskStatusResponse
 
 
 def _configured_origins() -> list[str]:
@@ -89,8 +120,8 @@ def create_app(
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=False,
-        allow_methods=["GET"],
-        allow_headers=[],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
     )
 
     @application.get(
@@ -124,7 +155,114 @@ def create_app(
             "summary": task_status.details,
         }
 
+    @application.get(
+        "/api/projects/{project_id}/queue",
+        response_model=QueueResponse,
+        responses={
+            404: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
+    async def get_queue(
+        project_id: str,
+        registry: Registry,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=200)] = 60,
+        kind: str = "",
+        split: str = "",
+        status: str = "",
+        q: str = "",
+    ) -> dict:
+        entry = _project_entry(registry, project_id)
+        raw_filters = {"kind": kind, "split": split, "status": status, "q": q}
+        filters = {key: value for key, value in raw_filters.items() if value}
+        try:
+            page = entry.module.queue(
+                entry.project,
+                QueueRequest(offset=offset, limit=limit, filters=filters),
+            )
+        except TaskOperationError as error:
+            _raise_task_error(error)
+        return {
+            "total": page.total,
+            "offset": page.offset,
+            "limit": page.limit,
+            "items": list(page.items),
+        }
+
+    @application.post(
+        "/api/projects/{project_id}/annotations",
+        response_model=AnnotationResponse,
+        responses={
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
+    async def submit_annotation(
+        project_id: str, annotation: AnnotationRequest, registry: Registry
+    ) -> dict:
+        entry = _project_entry(registry, project_id)
+        try:
+            result = entry.module.submit(
+                entry.project,
+                Submission(annotation.item_id, annotation.result),
+            )
+        except TaskOperationError as error:
+            _raise_task_error(error)
+        return {
+            "item": dict(result.item),
+            "status": {
+                "state": result.status.state,
+                "details": dict(result.status.details),
+            },
+        }
+
+    @application.get(
+        "/api/projects/{project_id}/files/{file_path:path}",
+        responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    )
+    async def get_project_file(
+        project_id: str, file_path: str, registry: Registry
+    ) -> Response:
+        entry = _project_entry(registry, project_id)
+        root = entry.project.root.resolve()
+        candidate = (root / file_path.lstrip("/")).resolve()
+        if (root not in candidate.parents and candidate != root) or not candidate.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "file_not_found", "message": "project file not found"},
+            )
+        try:
+            content = candidate.read_bytes()
+        except OSError:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "file_not_found", "message": "project file not found"},
+            ) from None
+        media_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+        return Response(content=content, media_type=media_type)
+
     return application
+
+
+def _project_entry(registry: ProjectRegistry, project_id: str):
+    try:
+        return registry.get_entry(project_id)
+    except RegistryError as error:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "project_not_found", "message": str(error)},
+        ) from error
+
+
+def _raise_task_error(error: TaskOperationError) -> None:
+    raise HTTPException(
+        status_code=409 if isinstance(error, TaskConflictError) else 422,
+        detail={"code": error.code, "message": str(error)},
+    ) from error
 
 
 app = create_app()

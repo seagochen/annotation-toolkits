@@ -12,6 +12,7 @@ from annotation_platform.task_types import (
     QueueRequest,
     Submission,
     SubmissionResult,
+    TaskConflictError,
     TaskOperationError,
     TaskProject,
     TaskStatus,
@@ -73,7 +74,10 @@ def test_default_registry_contains_reid():
     assert default_task_types().names() == ("reid",)
 
 
-def test_reid_adapter_reuses_queue_submission_status_and_export(dataset, tmp_path):
+@pytest.mark.parametrize("label", ["same", "different", "unclear"])
+def test_reid_adapter_reuses_queue_submission_status_and_export(
+    dataset, tmp_path, label
+):
     review = dataset / "review" / "v1" / "candidates.csv"
     write_csv(
         review,
@@ -93,10 +97,10 @@ def test_reid_adapter_reuses_queue_submission_status_and_export(dataset, tmp_pat
     assert page.items[0]["candidate_id"] == "c1"
     assert module.status(project).state == "reviewing"
 
-    result = module.submit(project, Submission("c1", {"label": "different"}))
-    assert result.item["review_label"] == "different"
+    result = module.submit(project, Submission("c1", {"label": label}))
+    assert result.item["review_label"] == label
     assert result.status.state == "reviewed"
-    assert read_csv(review)[0]["review_label"] == "different"
+    assert read_csv(review)[0]["review_label"] == label
 
     exported = module.export(project, ExportRequest())
     assert exported.format == "reid-pairs-csv"
@@ -115,3 +119,23 @@ def test_reid_adapter_rejects_invalid_submission_and_export(dataset, tmp_path):
         module.submit(project, Submission("c1", {"label": "maybe"}))
     with pytest.raises(TaskOperationError, match="does not support export format"):
         module.export(project, ExportRequest(format="coco"))
+
+
+def test_reid_submission_is_idempotent_but_rejects_stale_overwrite(dataset, tmp_path):
+    review = dataset / "review" / "v1" / "candidates.csv"
+    write_csv(review, CANDIDATE_FIELDS, [candidate("c1", "a", "b")])
+    config = tmp_path / "reid.yaml"
+    config.write_text(
+        f"dataset: {dataset}\npipeline:\n  script: tracking_csv\n",
+        encoding="utf-8",
+    )
+    module = ReIDTaskType()
+    project = module.load(config)
+    submission = Submission("c1", {"label": "same", "notes": "clear"})
+
+    assert module.submit(project, submission).item["review_label"] == "same"
+    assert module.submit(project, submission).item["review_label"] == "same"
+    with pytest.raises(TaskConflictError, match="already labelled 'same'"):
+        module.submit(project, Submission("c1", {"label": "different"}))
+
+    assert read_csv(review)[0]["review_label"] == "same"

@@ -27,6 +27,19 @@ from .provenance import Provenance
 
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 GALLERY_LIMIT = 8
+_STORE_LOCKS: dict[Path, threading.RLock] = {}
+_STORE_LOCKS_GUARD = threading.Lock()
+
+
+class LabelConflictError(RuntimeError):
+    """A write-once review request disagrees with an existing decision."""
+
+
+def _store_lock(path: Path) -> threading.RLock:
+    """Share the CSV lock across Store instances created for HTTP requests."""
+    key = path.resolve()
+    with _STORE_LOCKS_GUARD:
+        return _STORE_LOCKS.setdefault(key, threading.RLock())
 
 # Similarity columns the different mining generations wrote, most recent first.
 def spread(values: list, maximum: int) -> list:
@@ -55,7 +68,7 @@ class Store:
         self.root, self.candidates = root, candidates
         self.base_pairs = base_pairs
         self.reviews = reviews or ([candidates] if candidates else [])
-        self.lock = threading.RLock()
+        self.lock = _store_lock(candidates or root)
         self._rows: list[dict] = []
         self._stamp = -1.0
         self._gallery: dict[str, list[str]] = {}
@@ -130,7 +143,14 @@ class Store:
             value["img2"] = row.get("img2") or (gallery2[-1] if gallery2 else "")
             return value
 
-    def set_label(self, candidate_id: str, label: str, notes: str | None) -> dict | None:
+    def set_label(
+        self,
+        candidate_id: str,
+        label: str,
+        notes: str | None,
+        *,
+        overwrite: bool = True,
+    ) -> dict | None:
         with self.lock:
             rows = read_csv(self.candidates)
             fields = csv_fields(self.candidates)
@@ -139,6 +159,16 @@ class Store:
             target = None
             for row in rows:
                 if row.get("candidate_id") == candidate_id:
+                    current_label = row.get("review_label", "")
+                    current_notes = row.get("review_notes", "")
+                    if not overwrite and current_label:
+                        same_notes = notes is None or current_notes == notes
+                        if current_label == label and same_notes:
+                            return self.decorate(row)
+                        raise LabelConflictError(
+                            f"candidate {candidate_id!r} is already labelled "
+                            f"{current_label!r}"
+                        )
                     row["review_label"] = label
                     if notes is not None:
                         row["review_notes"] = notes
