@@ -20,7 +20,8 @@ flowchart LR
     Future --> Files
 ```
 
-React 项目导航和统一 API 已可用；现阶段 ReID 标注仍继续通过原有本地 Web 工作台运行。
+React 项目导航、ReID 成对审核和统一 API 已可用；ReID 流水线动作也由项目详情页统一
+触发并显示持久化日志和结果。
 
 ## 功能状态
 
@@ -30,9 +31,9 @@ React 项目导航和统一 API 已可用；现阶段 ReID 标注仍继续通过
 | 原子写入、审计与训练清单 | 可用 |
 | 后端/前端目录边界 | 可用 |
 | 多项目 Python 注册表 | 可用 |
-| 多项目统一 HTTP API | 可用（项目查询） |
+| 多项目统一 HTTP API | 可用（项目、队列、标注、动作） |
 | React 项目列表和详情 | 可用 |
-| React 任务标注界面 | 规划中 |
+| React ReID 标注界面 | 可用 |
 | 分类、检测、分割、文本、描述和深度任务 | 规划中 |
 
 ## 运行要求
@@ -52,7 +53,6 @@ pip install -e 'backend[test]'
 python backend/app.py init
 $EDITOR reid.yaml
 python backend/app.py status
-python backend/app.py
 ```
 
 启动统一项目 API（注册表格式见 `backend/configs/projects.example.yaml`）：
@@ -75,7 +75,8 @@ npm run dev
 ```
 
 浏览器访问 `http://127.0.0.1:5173`；开发服务器会把 `/api` 请求代理到上述 FastAPI
-服务。前端的完整开发、类型生成与验证命令见 [`frontend/README.md`](frontend/README.md)。
+服务。审核和六个 ReID 流水线动作均从对应项目页面进入。前端的完整开发、类型生成与
+验证命令见 [`frontend/README.md`](frontend/README.md)。
 
 需要执行视频抽取和候选挖掘时，安装完整可选依赖：
 
@@ -89,8 +90,8 @@ ReID 的数据约束、配置、流水线接入和完整操作说明见
 ## 仓库结构
 
 ```text
-backend/   Python 后端、现有 ReID 工作台、测试、配置和参考流水线
-frontend/  React/TypeScript 项目导航与后续任务工作台
+backend/   FastAPI 平台、ReID 任务模块、测试、配置和参考流水线
+frontend/  React/TypeScript 项目导航与任务工作台
 ```
 
 项目路线与未完成工作以 GitHub Issues 为准。

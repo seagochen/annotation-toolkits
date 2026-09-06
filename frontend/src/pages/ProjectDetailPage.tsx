@@ -3,6 +3,7 @@ import { Link, useParams } from "wouter";
 
 import { ApiError, getProject, type ProjectDetail } from "../api/client";
 import { ErrorState, LoadingState } from "../components/AsyncState";
+import { ReIDActions } from "../tasks/reid/ReIDActions";
 
 type LoadState =
   | { kind: "loading" }
@@ -92,6 +93,7 @@ export function ProjectDetailPage() {
           </dl>
         </article>
       </section>
+      {project.task_type === "reid" && <ReIDActions projectId={project.id} />}
     </>
   );
 }

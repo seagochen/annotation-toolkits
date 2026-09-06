@@ -66,21 +66,108 @@ describe("project pages", () => {
   });
 
   it("loads a project detail through its route", async () => {
-    fetchMock.mockResolvedValueOnce(
-      response({
-        id: "lobby",
-        name: "Lobby",
-        task_type: "reid",
-        root: "/data/lobby",
-        status: "reviewing",
-        summary: { pending: 3, labelled: 4 },
-      }),
-    );
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "lobby",
+          name: "Lobby",
+          task_type: "reid",
+          root: "/data/lobby",
+          status: "reviewing",
+          summary: { pending: 3, labelled: 4 },
+        }),
+      )
+      .mockResolvedValueOnce(response({ actions: [], jobs: [] }));
     renderAt("/projects/lobby");
     expect(await screen.findByRole("heading", { name: "Lobby" })).toBeVisible();
     expect(screen.getByText("/data/lobby")).toBeVisible();
     expect(screen.getByText("pending")).toBeVisible();
     expect(screen.getByText("3")).toBeVisible();
+  });
+
+  it("starts a safe ReID action and shows persisted results", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "lobby",
+          name: "Lobby",
+          task_type: "reid",
+          root: "/data/lobby",
+          status: "reviewed",
+          summary: {},
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          actions: ["check", "train"],
+          jobs: [
+            {
+              id: "old-job",
+              name: "check",
+              state: "done",
+              created_at: "2026-09-06T00:00:00Z",
+              started_at: "2026-09-06T00:00:00Z",
+              finished_at: "2026-09-06T00:00:01Z",
+              log: ["errors=0 warnings=0"],
+              result: { exit_code: 0 },
+              error: null,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(
+          {
+            id: "new-job",
+            name: "train",
+            state: "queued",
+            created_at: "2026-09-06T00:00:02Z",
+            started_at: null,
+            finished_at: null,
+            log: [],
+            result: null,
+            error: null,
+          },
+          202,
+        ),
+      );
+
+    renderAt("/projects/lobby");
+    expect(await screen.findByText("errors=0 warnings=0")).toBeVisible();
+    expect(screen.getByText('{"exit_code":0}')).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /启动训练/ }));
+    expect(await screen.findByText("queued")).toBeVisible();
+
+    const startRequest = fetchMock.mock.calls[2][0] as Request;
+    await expect(startRequest.clone().json()).resolves.toEqual({
+      options: { dry_run: true },
+    });
+  });
+
+  it("reports an action conflict without hiding project details", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "lobby",
+          name: "Lobby",
+          task_type: "reid",
+          root: "/data/lobby",
+          status: "reviewed",
+          summary: {},
+        }),
+      )
+      .mockResolvedValueOnce(response({ actions: ["check"], jobs: [] }))
+      .mockResolvedValueOnce(
+        response(
+          { detail: { code: "task_conflict", message: "another action is running" } },
+          409,
+        ),
+      );
+
+    renderAt("/projects/lobby");
+    fireEvent.click(await screen.findByRole("button", { name: /检查冲突/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("another action is running");
+    expect(screen.getByRole("heading", { name: "Lobby" })).toBeVisible();
   });
 
   it("distinguishes an unknown project from a service failure", async () => {

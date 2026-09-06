@@ -19,7 +19,7 @@ def test_check_runs_as_a_job_and_captures_stdout(dataset):
     project = make_project(dataset)
     runner = JobRunner(dataset / ".jobs")
     job = runner.start("check", project, SimpleNamespace(strict=False, json=False))
-    assert job.status in {"queued", "running"}
+    assert job.status in {"queued", "running", "done"}
     runner.join(job.id, timeout=5)
     finished = runner.get(job.id)
     assert finished.status == "done"
@@ -103,12 +103,51 @@ def test_only_one_job_runs_at_a_time(tmp_path, monkeypatch):
     assert runner.get(job.id).status == "done"
 
 
-def test_a_running_job_found_on_disk_is_marked_interrupted(tmp_path):
+def test_execution_gate_is_shared_across_projects(tmp_path, monkeypatch):
+    started, release = threading.Event(), threading.Event()
+
+    def slow(project, args):
+        started.set()
+        release.wait(timeout=5)
+        return 0
+
+    monkeypatch.setitem(app_module.DISPATCH, "check", slow)
+    first = JobRunner(tmp_path / "one" / ".jobs")
+    second = JobRunner(tmp_path / "two" / ".jobs")
+    job = first.start("check", None, SimpleNamespace())
+    assert started.wait(timeout=5)
+    with pytest.raises(JobBusyError, match="another project action"):
+        second.start("check", None, SimpleNamespace())
+    release.set()
+    first.join(job.id, timeout=5)
+    assert first.get(job.id).status == "done"
+
+
+def test_start_persistence_failure_releases_execution_gate(tmp_path, monkeypatch):
+    broken = JobRunner(tmp_path / "broken" / ".jobs")
+    original_persist = broken._persist
+
+    def fail(job):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(broken, "_persist", fail)
+    with pytest.raises(OSError, match="disk full"):
+        broken.start("check", None, SimpleNamespace())
+    monkeypatch.setattr(broken, "_persist", original_persist)
+    monkeypatch.setitem(app_module.DISPATCH, "check", lambda project, args: 0)
+
+    job = broken.start("check", None, SimpleNamespace())
+    broken.join(job.id, timeout=5)
+    assert broken.get(job.id).status == "done"
+
+
+@pytest.mark.parametrize("state", ["queued", "running"])
+def test_an_unfinished_job_found_on_disk_is_marked_interrupted(tmp_path, state):
     """A job persisted mid-run did not survive whatever stopped the process
     that was running it -- it must not show as permanently "running"."""
     jobs_dir = tmp_path / ".jobs"
     jobs_dir.mkdir()
-    stuck = Job(id="abc123", stage="extract", status="running", created_at="2020-01-01T00:00:00")
+    stuck = Job(id="abc123", stage="extract", status=state, created_at="2020-01-01T00:00:00")
     (jobs_dir / "abc123.json").write_text(json.dumps(stuck.to_dict()), encoding="utf-8")
     runner = JobRunner(jobs_dir)
     reloaded = runner.get("abc123")

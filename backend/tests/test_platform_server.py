@@ -1,4 +1,6 @@
 import asyncio
+import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -17,6 +19,7 @@ from annotation_platform.task_types import (
     TaskTypeRegistry,
 )
 from conftest import CANDIDATE_FIELDS, candidate, write_csv
+from reid_annotation_tool import app as reid_app
 from reid_annotation_tool.core import read_csv
 
 
@@ -72,6 +75,19 @@ def request(app, method: str, path: str, **kwargs) -> httpx.Response:
             return await client.request(method, path, **kwargs)
 
     return asyncio.run(send())
+
+
+def wait_for_action(app, project_id: str, action_id: str) -> dict:
+    for _ in range(100):
+        response = request(
+            app, "GET", f"/api/projects/{project_id}/actions/jobs/{action_id}"
+        )
+        assert response.status_code == 200
+        job = response.json()
+        if job["state"] in {"done", "failed"}:
+            return job
+        time.sleep(0.01)
+    raise AssertionError(f"action {action_id} did not finish")
 
 
 def test_project_list_and_detail_reuse_registry_status(tmp_path):
@@ -300,3 +316,155 @@ def test_write_failure_is_reported_and_preserves_existing_decision(
     assert response.status_code == 422
     assert "disk full" in response.json()["detail"]["message"]
     assert read_csv(review)[0]["review_label"] == ""
+
+
+def test_all_reid_actions_can_be_started_listed_and_polled(tmp_path, monkeypatch):
+    registry, _ = make_review_registry(tmp_path)
+    actions = ("extract", "mine", "check", "finalize", "purge-domain", "train")
+    for action in actions:
+        monkeypatch.setitem(reid_app.DISPATCH, action, lambda project, args: 0)
+    app = create_app(registry)
+
+    listing = request(app, "GET", "/api/projects/lobby/actions")
+    assert listing.status_code == 200
+    assert tuple(listing.json()["actions"]) == actions
+    assert listing.json()["jobs"] == []
+
+    for action in actions:
+        options = {"apply": False} if action == "purge-domain" else {}
+        started = request(
+            app,
+            "POST",
+            f"/api/projects/lobby/actions/{action}",
+            json={"options": options},
+        )
+        assert started.status_code == 202
+        assert wait_for_action(app, "lobby", started.json()["id"])["state"] == "done"
+
+    history = request(app, "GET", "/api/projects/lobby/actions").json()["jobs"]
+    assert [job["name"] for job in history] == list(actions)
+
+
+def test_action_errors_are_stable_and_failed_jobs_remain_visible(tmp_path, monkeypatch):
+    registry, review = make_review_registry(tmp_path)
+    original = review.read_bytes()
+    app = create_app(registry)
+
+    unknown = request(
+        app,
+        "POST",
+        "/api/projects/lobby/actions/evaluate",
+        json={"options": {}},
+    )
+    assert unknown.status_code == 422
+    assert unknown.json()["detail"]["code"] == "task_operation_error"
+
+    invalid = request(
+        app,
+        "POST",
+        "/api/projects/lobby/actions/check",
+        json={"options": {"strict": "yes"}},
+    )
+    assert invalid.status_code == 422
+
+    def fail(project, args):
+        raise ValueError("invalid dataset")
+
+    monkeypatch.setitem(reid_app.DISPATCH, "check", fail)
+    started = request(
+        app,
+        "POST",
+        "/api/projects/lobby/actions/check",
+        json={"options": {}},
+    )
+    failed = wait_for_action(app, "lobby", started.json()["id"])
+    assert failed["state"] == "failed"
+    assert failed["error"] == "invalid dataset"
+    assert review.read_bytes() == original
+
+    missing = request(
+        app, "GET", "/api/projects/lobby/actions/jobs/does-not-exist"
+    )
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "action_not_found"
+
+
+def test_concurrent_action_returns_conflict(tmp_path, monkeypatch):
+    registry, _ = make_review_registry(tmp_path)
+    started, release = threading.Event(), threading.Event()
+
+    def slow(project, args):
+        started.set()
+        release.wait(timeout=5)
+        return 0
+
+    monkeypatch.setitem(reid_app.DISPATCH, "check", slow)
+    app = create_app(registry)
+    first = request(
+        app,
+        "POST",
+        "/api/projects/lobby/actions/check",
+        json={"options": {}},
+    )
+    assert first.status_code == 202
+    assert started.wait(timeout=5)
+    try:
+        conflict = request(
+            app,
+            "POST",
+            "/api/projects/lobby/actions/check",
+            json={"options": {}},
+        )
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"]["code"] == "task_conflict"
+    finally:
+        release.set()
+    assert wait_for_action(app, "lobby", first.json()["id"])["state"] == "done"
+
+
+def test_check_action_matches_the_cli_result_and_log(tmp_path, capsys):
+    registry, _ = make_review_registry(tmp_path)
+    config = tmp_path / "reid.yaml"
+    cli_exit = reid_app.main(["check", "--config", str(config)])
+    cli_log = capsys.readouterr().out.strip().splitlines()
+
+    app = create_app(registry)
+    started = request(
+        app,
+        "POST",
+        "/api/projects/lobby/actions/check",
+        json={"options": {}},
+    )
+    job = wait_for_action(app, "lobby", started.json()["id"])
+    assert job["result"] == {"exit_code": cli_exit}
+    assert job["log"] == cli_log
+
+
+def test_review_to_finalize_artifacts_match_cli(tmp_path):
+    registry, _ = make_review_registry(tmp_path)
+    app = create_app(registry)
+    annotation = request(
+        app,
+        "POST",
+        "/api/projects/lobby/annotations",
+        json={"item_id": "c1", "result": {"label": "same", "notes": "match"}},
+    )
+    assert annotation.status_code == 200
+
+    started = request(
+        app,
+        "POST",
+        "/api/projects/lobby/actions/finalize",
+        json={"options": {}},
+    )
+    assert wait_for_action(app, "lobby", started.json()["id"])["state"] == "done"
+    dataset = tmp_path / "dataset"
+    artifacts = (
+        dataset / "pairs.reviewed-v1.csv",
+        dataset / "pairs.reviewed-v1.report.json",
+        dataset / "pairs.current.json",
+    )
+    api_outputs = {path.name: path.read_bytes() for path in artifacts}
+
+    assert reid_app.main(["finalize", "--config", str(tmp_path / "reid.yaml")]) == 0
+    assert {path.name: path.read_bytes() for path in artifacts} == api_outputs

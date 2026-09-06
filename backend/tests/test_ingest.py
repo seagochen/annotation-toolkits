@@ -162,7 +162,13 @@ def test_a_script_returning_the_wrong_type_is_refused_at_the_boundary(tmp_path):
 
 def test_status_reports_the_next_step_without_any_flags(project, capsys):
     stage_extract(project, None)
-    assert main(["status", "--config", str(project.path)]) == 0
+    assert main(["--config", str(project.path)]) == 0
     printed = capsys.readouterr().out
     assert str(project.dataset) in printed
     assert "python app.py mine" in printed      # crops exist, no review round yet
+
+
+def test_legacy_serve_command_is_removed():
+    with pytest.raises(SystemExit) as exit_info:
+        main(["serve"])
+    assert exit_info.value.code == 2

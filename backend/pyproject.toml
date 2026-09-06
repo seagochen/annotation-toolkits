@@ -30,7 +30,7 @@ reid-annotation = "reid_annotation_tool.app:main"
 include = ["annotation_platform*", "reid_annotation_tool*"]
 
 [tool.setuptools.package-data]
-reid_annotation_tool = ["web/*", "pipelines/*.py"]
+reid_annotation_tool = ["pipelines/*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

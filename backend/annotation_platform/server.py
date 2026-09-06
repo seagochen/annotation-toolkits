@@ -15,8 +15,11 @@ from pydantic import BaseModel, Field
 from reid_annotation_tool.project_registry import ProjectRegistry, RegistryError
 
 from .task_types import (
+    ActionRecord,
+    ActionRequest,
     QueueRequest,
     Submission,
+    TaskActionModule,
     TaskConflictError,
     TaskOperationError,
     TaskTypeRegistry,
@@ -71,6 +74,27 @@ class TaskStatusResponse(BaseModel):
 class AnnotationResponse(BaseModel):
     item: dict[str, object]
     status: TaskStatusResponse
+
+
+class ActionOptions(BaseModel):
+    options: dict[str, object] = Field(default_factory=dict)
+
+
+class ActionResponse(BaseModel):
+    id: str
+    name: str
+    state: str
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+    log: list[str]
+    result: dict[str, object] | None
+    error: str | None
+
+
+class ActionListResponse(BaseModel):
+    actions: list[str]
+    jobs: list[ActionResponse]
 
 
 def _configured_origins() -> list[str]:
@@ -221,6 +245,66 @@ def create_app(
         }
 
     @application.get(
+        "/api/projects/{project_id}/actions",
+        response_model=ActionListResponse,
+        responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    )
+    async def list_actions(project_id: str, registry: Registry) -> dict:
+        entry = _project_entry(registry, project_id)
+        module = _action_module(entry.module)
+        return {
+            "actions": list(module.action_names()),
+            "jobs": [
+                _action_response(job) for job in module.list_actions(entry.project)
+            ],
+        }
+
+    @application.post(
+        "/api/projects/{project_id}/actions/{action}",
+        response_model=ActionResponse,
+        status_code=202,
+        responses={
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
+    async def start_action(
+        project_id: str,
+        action: str,
+        payload: ActionOptions,
+        registry: Registry,
+    ) -> dict:
+        entry = _project_entry(registry, project_id)
+        module = _action_module(entry.module)
+        try:
+            job = module.start_action(
+                entry.project, ActionRequest(name=action, options=payload.options)
+            )
+        except TaskOperationError as error:
+            _raise_task_error(error)
+        return _action_response(job)
+
+    @application.get(
+        "/api/projects/{project_id}/actions/jobs/{action_id}",
+        response_model=ActionResponse,
+        responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    )
+    async def get_action(
+        project_id: str, action_id: str, registry: Registry
+    ) -> dict:
+        entry = _project_entry(registry, project_id)
+        module = _action_module(entry.module)
+        job = module.get_action(entry.project, action_id)
+        if job is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "action_not_found", "message": "action job not found"},
+            )
+        return _action_response(job)
+
+    @application.get(
         "/api/projects/{project_id}/files/{file_path:path}",
         responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
     )
@@ -263,6 +347,32 @@ def _raise_task_error(error: TaskOperationError) -> None:
         status_code=409 if isinstance(error, TaskConflictError) else 422,
         detail={"code": error.code, "message": str(error)},
     ) from error
+
+
+def _action_module(module: object) -> TaskActionModule:
+    if not isinstance(module, TaskActionModule):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "actions_not_supported",
+                "message": "project task type does not expose actions",
+            },
+        )
+    return module
+
+
+def _action_response(job: ActionRecord) -> dict:
+    return {
+        "id": job.id,
+        "name": job.name,
+        "state": job.state,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "log": list(job.log),
+        "result": dict(job.result) if job.result is not None else None,
+        "error": job.error,
+    }
 
 
 app = create_app()

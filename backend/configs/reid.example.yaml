@@ -2,7 +2,7 @@
 #
 #   python app.py extract --config configs/reid.example.yaml
 #   python app.py mine    --config configs/reid.example.yaml
-#   python app.py         --config configs/reid.example.yaml     # 起标注网页
+#   在 Annotation Toolkits React 工作台打开已注册项目进行标注
 #
 # 相对路径都相对本文件所在目录。所有键的默认值见 reid_annotation_tool/config.py。
 
@@ -98,11 +98,6 @@ mine:
   per_split: 200
   purity_per_split: 50
   # output_dir 留空则自动取下一轮 review/vN
-
-serve:
-  host: 0.0.0.0
-  port: 8000
-
 
 # ------------------------------------------------------------------- train
 train:

@@ -7,7 +7,7 @@ import json
 import pytest
 
 from reid_annotation_tool.core import PAIR_FIELDS, supersede
-from reid_annotation_tool.server import Store
+from reid_annotation_tool.review_store import Store
 
 from conftest import CANDIDATE_FIELDS, IDENTITY_FIELDS, TRACK_FIELDS, write_csv
 

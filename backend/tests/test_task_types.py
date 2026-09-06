@@ -4,6 +4,7 @@ import pytest
 
 from annotation_platform.reid_task import ReIDTaskType
 from annotation_platform.task_types import (
+    ActionRequest,
     DuplicateTaskTypeError,
     ExportRequest,
     ExportResult,
@@ -139,3 +140,36 @@ def test_reid_submission_is_idempotent_but_rejects_stale_overwrite(dataset, tmp_
         module.submit(project, Submission("c1", {"label": "different"}))
 
     assert read_csv(review)[0]["review_label"] == "same"
+
+
+def test_reid_actions_reuse_job_runner_and_validate_options(dataset, tmp_path):
+    config = tmp_path / "reid.yaml"
+    config.write_text(
+        f"dataset: {dataset}\npipeline:\n  script: tracking_csv\n",
+        encoding="utf-8",
+    )
+    module = ReIDTaskType()
+    project = module.load(config)
+
+    assert module.action_names() == (
+        "extract",
+        "mine",
+        "check",
+        "finalize",
+        "purge-domain",
+        "train",
+    )
+    started = module.start_action(project, ActionRequest("check"))
+    module._runner(project).join(started.id, timeout=5)
+    finished = module.get_action(project, started.id)
+    assert finished is not None
+    assert finished.state == "done"
+    assert finished.result == {"exit_code": 0}
+    assert module.list_actions(project)[-1].id == started.id
+
+    with pytest.raises(TaskOperationError, match="unknown reid action"):
+        module.start_action(project, ActionRequest("evaluate"))
+    with pytest.raises(TaskOperationError, match="unsupported options"):
+        module.start_action(project, ActionRequest("mine", {"apply": True}))
+    with pytest.raises(TaskOperationError, match="must be boolean"):
+        module.start_action(project, ActionRequest("check", {"strict": "yes"}))

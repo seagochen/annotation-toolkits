@@ -1,4 +1,4 @@
-"""Where every relation answer came from, and what the web may do about it.
+"""Where every relation answer came from, and how clients can explain it.
 
 The conflict page does not just list contradictions: it expands the whole
 same-chain behind one, shows each edge's crops and every record that asserts
@@ -7,9 +7,9 @@ other part of the app wants — every review round ever written, indexed by pair
 with each answer's round, source, similarity metric and the model that measured
 it, joined against the pair manifest by exact line number.
 
-Keeping it beside the HTTP layer made ``server.py`` three unrelated jobs in one
-file. Here it is one: read the provenance, decide what it means, and hand the
-web app a decorated report. Nothing in this module writes.
+Keeping it beside the former HTTP layer mixed unrelated jobs in one module. Here it
+is one: read the provenance, decide what it means, and return a decorated report.
+Nothing in this module writes.
 """
 
 from __future__ import annotations
@@ -187,7 +187,7 @@ class Provenance:
         files: list[Path] = []
         seen: set[Path] = set()
         # self.candidates is None on a brand-new project (no live round yet;
-        # see server.serve's candidates=None path) -- nothing to add then.
+        # A project may not have a review round yet -- nothing to add then.
         for path in discovered + list(self.reviews) + ([self.candidates] if self.candidates else []):
             resolved = path.resolve()
             if resolved not in seen:
@@ -495,7 +495,7 @@ class Provenance:
                     "origin": origin_rounds,
                     "detail": (f"{len(matched)} 行在 pairs.csv 中"
                                + (f"；原判来自 {'、'.join(origin_rounds)}" if origin_rounds else "")
-                               + "；当前版本不支持网页推翻基础边"),
+                               + "；当前平台不支持推翻基础边"),
                 })
             else:
                 entries = answers.get(witness, [])

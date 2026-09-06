@@ -1,5 +1,5 @@
 
-from reid_annotation_tool.server import Store, WEB_ROOT, spread
+from reid_annotation_tool.review_store import Store, spread
 
 from conftest import CANDIDATE_FIELDS, candidate, write_csv
 
@@ -55,8 +55,3 @@ def test_conflict_cache_goes_stale_on_a_new_label(dataset):
 def test_gallery_sampling_spans_the_whole_track():
     assert spread(list(range(10)), 4) == [0, 3, 6, 9]
     assert spread([1, 2], 4) == [1, 2]
-
-
-def test_full_and_compatibility_review_pages_are_packaged():
-    assert (WEB_ROOT / "index.html").is_file()
-    assert (WEB_ROOT / "simple.html").is_file()

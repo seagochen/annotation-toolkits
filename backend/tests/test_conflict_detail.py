@@ -15,7 +15,7 @@ import pytest
 from reid_annotation_tool.core import PAIR_FIELDS, read_csv
 from reid_annotation_tool.provenance import (candidate_metric, edge_decision,
                                              weakest_edge_index)
-from reid_annotation_tool.server import Store
+from reid_annotation_tool.review_store import Store
 
 from conftest import (CANDIDATE_FIELDS, COVISIBLE_FIELDS, IDENTITY_FIELDS,
                       TRACK_FIELDS, write_csv)

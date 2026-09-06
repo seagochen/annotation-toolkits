@@ -22,7 +22,7 @@ video -> 你的流水线脚本（检测 + 跟踪 + ID 分配）
       -> accepted continuous tracks / rejected crops
       -> automatic same-track positives + covisible negatives
       -> lightweight ReID candidate mining (cross-track / track-purity)
-      -> persistent human review in the web app
+      -> persistent human review in the React annotation workspace
       -> identity-logic conflict gate
       -> immutable train/val/test pair manifest
       -> retrain with ../mobilenet-yolopose-plugin-pytorch
@@ -36,7 +36,7 @@ video -> 你的流水线脚本（检测 + 跟踪 + ID 分配）
 - `unclear` 永远不进入训练；
 - 模型距离只决定审核顺序；
 - 默认只有 `train` 可被新标注扩充，`val`/`test` 会逐行校验不变；
-- 标注通过临时文件、`fsync`、原子替换保存，刷新网页不会丢失。
+- 标注通过临时文件、`fsync`、原子替换保存，刷新工作台不会丢失。
 
 ## 部署
 
@@ -44,9 +44,8 @@ video -> 你的流水线脚本（检测 + 跟踪 + ID 分配）
 
 - Python ≥ 3.10（`pyproject.toml` 的硬性要求）。
 - 依赖分两档，按机器角色选：
-  - **只做标注 / 审计 / finalize**（开网页标注、跑 `check`、跑 `finalize`）：
-    只需要 `PyYAML`。网页、冲突引擎和配对清单全部是标准库实现，不需要
-    opencv / onnxruntime / ultralytics。
+  - **只做标注 / 审计 / finalize**（启动平台、跑 `check`、跑 `finalize`）：
+    只需要基础安装。冲突引擎和配对清单不需要 opencv / onnxruntime / ultralytics。
   - **要跑 `extract` / `mine`**（读录像、切裁剪、跑 ReID 模型给候选排序）：
     还需要 `numpy` / `opencv-python` / `onnxruntime`；用随包的 `ultralytics`
     参考流水线时再加 `ultralytics`（自带跟踪脚本的话不需要）。
@@ -81,43 +80,20 @@ python app.py status        # 数据集现状 + 建议的下一步
 当前轮自动作为待审队列，历史轮次自动全部纳入冲突检测——这一条以前靠手敲
 `--review`，敲漏一个就会静默改变冲突检测能看到的答案。
 
-### 4. 起标注网页
+### 4. 启动统一标注平台
 
-```bash
-python app.py               # 起标注网页（默认动作，= serve）
-```
+在根目录按 `README.md` 启动 FastAPI 与 React，然后在项目详情页进入审核或运行
+`extract`、`mine`、`check`、`finalize`、`purge-domain`、`train`。任务在后台执行，
+日志和结果持久化到 `<dataset>/.jobs/`；整个平台进程同一时间只运行一个动作。
 
-默认监听 `127.0.0.1:8000`（`serve.host` / `serve.port`，见 `reid_annotation_tool/config.py`
-的 `DEFAULTS`），只有本机能访问；团队内网共用时把 `reid.yaml` 里的
-`serve.host` 改成 `0.0.0.0`（`configs/reid.example.yaml` 就是这样配的），
-局域网内其他机器即可访问 `http://<本机IP>:8000/`。
-
-这是基于标准库 `ThreadingHTTPServer` 的单进程服务，面向团队内网标注场景，
-不做鉴权，不要直接暴露公网。需要长期后台运行时，用 `tmux` / `systemd` /
-`nohup` 之类的进程管理工具包一层即可——本工具自身不做 daemonize。
-
-网页除了"审核""冲突"，还有三个操作台标签，覆盖配置、模型、跑阶段这几件事，
-尽量不用再手改 YAML 或敲 CLI 参数：
-
-| 标签 | 做什么 |
-| --- | --- |
-| 配置 | 按节编辑 `reid.yaml`：封闭节（`extract`/`crops`/`mine`/`train`/…）是按
-  `DEFAULTS` 生成的表单，写错键会拒绝且不改动原文件；`pipeline` 这类开放节退化成
-  原始 JSON 编辑（保存会重写整份文件，注释和手写格式会丢失，网页会提示）。 |
-| 模型 | 增删 `models:` 节里的命名权重（见"命名模型"一节），不用到处手抄同一个路径。 |
-| 任务 | 后台跑 `extract` / `mine` / `check` / `finalize` / `train` / `evaluate` /
-  `purge-domain`，实时看日志，历史任务记录在 `<dataset>/.jobs/`。同一时间只跑
-  一个任务——两个 `extract` 同时跑对同一个数据集没有意义，日志也会串在一起。 |
-
-`python app.py`（= `serve`）在全新项目（还没跑过 `extract`/`mine`）上也能直接起：
-"审核"标签会显示暂无候选，但配置/模型/任务三个标签照常可用，可以直接在"任务"
-标签里跑第一次 `extract`。
+旧 `python app.py serve` 和标准库 HTTP 页面已经移除。旧配置中的 `serve:` 节仍可读取，
+但会被忽略；监听地址改由 Uvicorn 启动参数控制。
 
 ### 命令一览
 
 | 命令 | 作用 |
 | --- | --- |
-| `python app.py` | 起标注网页（= `serve`） |
+| `python app.py` | 数据集现状与下一步（= `status`） |
 | `python app.py status` | 数据集现状与下一步 |
 | `python app.py extract` | 用你的流水线脚本接入录像，产出数据集 |
 | `python app.py mine` | 挖掘下一轮审核候选 |
@@ -127,7 +103,8 @@ python app.py               # 起标注网页（默认动作，= serve）
 | `python app.py evaluate` | 把 checkpoint 交给外部评估器（本工具不计算指标） |
 | `python app.py purge-domain` | 归档跨天 / 跨相机关系 |
 
-单次覆盖配置用 `--set 节.键=值`，例如 `python app.py --set serve.port=9000`。
+单次覆盖配置用 `--set 节.键=值`，例如
+`python app.py extract --set crops.min_blur=40`。
 
 完整工作流是下面的 1-6 节，按顺序跑一遍：接入流水线 → 抽取数据集 → 挖掘并标注
 → 冲突检测 → 汇总并重新训练 → 评估训练产出。
@@ -188,7 +165,7 @@ def process_frame(image, source, config) -> list[Observation]:
    自带的 `model.track()` 都一样，本工具只关心你最后交出的 `(框, track_id)`；
 3. **导入** —— 把上面两步包成一个 `process_frame`，`python app.py extract` 就会拿它
    跑完所有录像：切裁剪、判纯净度、建数据集；
-4. **标注** —— `python app.py mine` 挖候选，`python app.py` 起网页开始标。
+4. **标注** —— `python app.py mine` 挖候选，在 React 项目页面开始标。
 
 装依赖：
 
@@ -284,7 +261,7 @@ projection:
 ```bash
 python app.py extract     # 全部录像 -> images/ + identities.csv + pairs.csv + manifest.json
 python app.py mine        # 挖候选 -> review/v1/candidates.csv
-python app.py             # 起网页，开始标注
+# 在 Annotation Toolkits React 工作台打开项目开始标注
 ```
 
 三个容易踩的点：
@@ -428,11 +405,11 @@ ReID 模型训练在全身上，而身体矩形不是头框的固定倍数 —�
 <out>/manifest.json      契约、流水线脚本与其 SHA-256、每个划分的统计
 ```
 
-## 3. 挖掘候选并在网页上标注
+## 3. 挖掘候选并在 React 工作台标注
 
 ```bash
 python app.py mine        # 自动写到下一轮 review/vN，并沿用所有历史轮次的答案
-python app.py             # 起网页；当前轮自动作为待审队列
+# 在 React 项目页面打开当前待审队列
 ```
 
 挖掘两类问题（模型只提问，不回答）：
@@ -444,22 +421,13 @@ python app.py             # 起网页；当前轮自动作为待审队列
 `candidate_id` 由内容哈希生成，因此换模型重新挖掘时，已标注的答案会自动保留
 （`report.json` 中的 `preserved_labels`）。
 
-网页工作台（打开 `http://host:port/`）：
+React 工作台：
 
-- 左侧队列支持按类型 / 划分 / 状态 / ID 过滤；
-- 中间是两条轨迹的完整画廊，蓝框是模型给出的证据裁剪，点击放大；
-- 快捷键：`1/S` 同一目标，`2/D` 不同目标，`3/U` 无法判断，`J/K` 上下切换，
-  `N` 写备注，`Z` 放大，`Esc` 关闭；
-- “冲突”页实时列出身份逻辑冲突，点开一条冲突链会展开链上每条 same 边的裁剪与出处，
-  每条边下方直接给出 **相同 / 不同 / 不确定** 按钮：已有判定的边会高亮对应按钮并写明出处
-  （当前轮候选 / `pairs.csv` 行号 / 历史轮次），改判就地生效并原地刷新整条链；
-- 多条 `transitive_negative` 的 same 路径相交时，页面会将它们合并成一个冲突组：
-  顶部关系图以实线表示 same、红色虚线表示 proven-different，并保留每一对 different 端点；
-  下方只展示一次去重后的 same 边，点击图中实线可跳到对应复核卡，避免重复梳理同一段链；
-- 改判已烤进 `pairs.csv` 的旧人判会先归档留痕（`pairs.overturned.csv`、
-  `revisions.json`，一次性备份 `pairs.before_web_revision.csv`），新判定作为当前轮候选入队；
-  抽取阶段的物理证据（共现、同一连续轨迹）不可从网页推翻，判定照样记录但冲突会继续报出；
-- 每次标注都原子写回 CSV，冲突检测在后台线程刷新，不阻塞标注节奏。
+- 显示双方轨迹证据画廊，支持 `same`、`different`、`unclear` 和审核备注；
+- 快捷键 `1`、`2`、`3` 对应三种判定；
+- 保存失败会保留当前候选并允许幂等重试；不同判定不会静默覆盖已保存结果；
+- 每次标注都原子写回现有 `candidates.csv`，CLI 可直接读取；
+- 冲突详情与关系修订目前通过 `python app.py check` 和后续平台能力处理。
 
 ## 4. 逻辑冲突检测
 
@@ -482,7 +450,7 @@ python app.py check --json > conflicts.json
 | `contaminated_track`（warning） | 已判定为混合轨迹但仍带着正样本，finalize 会丢弃 |
 
 每条冲突都会给出**证人**：`base:<evidence>` 表示来自抽取阶段的固定证据
-（需重新抽取才能改变），其余是可在网页上直接改的 `candidate_id`。
+（需重新抽取才能改变），其余关系可通过对应的 `candidate_id` 追溯到审核轮次。
 
 `covisible_merge` 与 `transitive_negative` 是互补的：`pairs.csv` 里的负样本按
 `--negative-ratio` 采样，未被采样的共现关系仍然是物理事实，因此单独检查。
@@ -605,7 +573,7 @@ from reid_annotation_tool.core import build_constraints, read_csv
 
 root = Path("datasets/reid")
 graph, _, conflicts = build_constraints(read_csv(root / "pairs.reviewed-v1.csv"), [])
-assert not conflicts, conflicts          # 有冲突说明标注自相矛盾，先去网页上解决
+assert not conflicts, conflicts          # 有冲突说明标注自相矛盾，先复核审核结果
 label_of = {row["img_path"]: graph.find(row["person_id"])
             for row in read_csv(root / "identities.csv")}
 ```
@@ -718,7 +686,7 @@ projects:
 | `extract` / `splits` | 用哪些录像、抽多密、时间与划分怎么读 |
 | `projection` | 相机标定（头→身体裁剪几何） |
 | `crops` / `pairs` | 什么样的裁剪可信、什么样的两张裁剪算证据 |
-| `mine` / `serve` / `train` / `evaluate` | 候选排序、网页、交给外部训练器/评估器（只有接口，没有超参或指标定义） |
+| `mine` / `train` / `evaluate` | 候选排序、交给外部训练器/评估器（只有接口，没有超参或指标定义） |
 | `models` | 给权重文件起名字，供 `pipeline:` 或你自己的脚本按名字引用 |
 
 除 `pipeline` / `models` 外，所有节的键都对照 `reid_annotation_tool/config.py` 的

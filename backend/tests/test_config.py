@@ -131,13 +131,20 @@ def test_models_entry_rejects_unknown_keys(tmp_path):
 
 def test_one_run_overrides_land_on_a_known_key_only(tmp_path):
     project = project_config.load(write(tmp_path))
-    project_config.apply_override(project.sections, "serve.port=9000")
-    assert project.stage("serve").port == 9000
-    for bad, message in (("serve.portt=1", "unknown `serve` key"),
+    project_config.apply_override(project.sections, "crops.min_blur=42")
+    assert project.stage("extract").min_blur == 42
+    for bad, message in (("crops.min_blurr=1", "unknown `crops` key"),
                          ("nope.port=1", "unknown section"),
-                         ("serve.port", "section.key=value")):
+                         ("crops.min_blur", "section.key=value")):
         with pytest.raises(ConfigError, match=message):
             project_config.apply_override(project.sections, bad)
+
+
+def test_retired_serve_section_is_accepted_but_ignored(tmp_path):
+    project = project_config.load(
+        write(tmp_path, MINIMAL + "serve:\n  host: 0.0.0.0\n  port: 9000\n")
+    )
+    assert "serve" not in project.sections
 
 
 def round_file(project, relative, mtime, labels=("",)):

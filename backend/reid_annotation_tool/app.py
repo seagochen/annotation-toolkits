@@ -1,12 +1,11 @@
 """The one entry point: every stage of the workbench, driven by one project file.
 
-``python app.py`` with no arguments opens the annotation web app on whatever
-this project's dataset currently holds. Every other stage is one word. There
-are no per-stage flag walls any more: paths are stated once under ``dataset:``
+``python app.py`` with no arguments reports the project status. Every stage is
+one word. There are no per-stage flag walls: paths are stated once under ``dataset:``
 and derived from there, and tuning lives in named sections of ``reid.yaml``
 (see config.py), so a stage takes only what genuinely varies per invocation.
 
-    python app.py                # 起标注网页（默认）
+    python app.py                # 数据集现状（默认）
     python app.py status         # 数据集现状与建议的下一步
     python app.py init           # 写一份 reid.yaml 模板
     python app.py extract        # 用你自己的跟踪脚本接入录像，产出数据集
@@ -60,12 +59,9 @@ splits:
 mine:
   reid_onnx: ./rough-reid.onnx
 
-serve:
-  host: 127.0.0.1
-  port: 8000
 '''
 
-STAGES = ("serve", "status", "init", "extract", "mine", "check", "finalize",
+STAGES = ("status", "init", "extract", "mine", "check", "finalize",
           "train", "evaluate", "purge-domain")
 
 
@@ -73,12 +69,11 @@ def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(
         prog="reid-annotation", description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    value.add_argument("stage", nargs="?", default="serve", choices=STAGES,
-                       help="默认 serve（启动标注网页）")
+    value.add_argument("stage", nargs="?", default="status", choices=STAGES,
+                       help="默认 status（显示项目现状）")
     value.add_argument("--config", type=Path, help="项目文件（默认向上查找 reid.yaml）")
     value.add_argument("--set", action="append", default=[], dest="overrides",
                        metavar="SECTION.KEY=VALUE", help="本次运行覆盖配置中的一个键")
-    value.add_argument("--port", type=int, help="serve: 覆盖端口")
     value.add_argument("--apply", action="store_true", help="purge-domain: 真正写入")
     value.add_argument("--dry-run", action="store_true",
                        help="train/evaluate: 只生成配置不运行")
@@ -119,7 +114,11 @@ def stage_status(project: Project) -> int:
         print(f"  当前轮 {value['live_round']}   已标注 {value['labelled']}   "
               f"待审核 {value['pending']}")
     print(f"  历史轮次 {', '.join(value['rounds']) or '（无）'}")
-    print(f"下一步:  python app.py {next_step(value)}")
+    following = next_step(value)
+    if following == "review":
+        print("下一步:  在 Annotation Toolkits React 工作台审核候选")
+    else:
+        print(f"下一步:  python app.py {following}")
     return 0
 
 
@@ -130,29 +129,8 @@ def next_step(value: dict) -> str:
     if not value["live_round"]:
         return "mine"
     if value["pending"]:
-        return "serve"
+        return "review"
     return "check"
-
-
-def stage_serve(project: Project, args) -> int:
-    from .server import serve
-
-    live = project.live_round()
-    settings = project.stage("serve")
-    port = args.port or settings.port
-    rounds = project.rounds()
-    if live is None:
-        # Not a reason to refuse to start any more: config/model/job control
-        # (配置/模型/任务) works on a brand-new project before extract/mine
-        # have ever run, and the 任务 tab can run them from the browser.
-        print("还没有审核轮次 —— 标注页暂时没有候选，可先在网页的“任务”标签跑"
-              "`extract` / `mine`，或用 `python app.py mine` 生成。")
-    else:
-        print(f"候选  {live.relative_to(project.dataset)}（自动发现）")
-        print(f"历史  {', '.join(path.parent.name for path in rounds)}（全部纳入冲突检测）")
-    serve(project.dataset, live, settings.host, port, project.base_pairs, rounds,
-         config_path=project.path)
-    return 0
 
 
 def stage_extract(project: Project, args) -> int:
@@ -297,7 +275,7 @@ def stage_purge(project: Project, args) -> int:
 
 
 DISPATCH = {
-    "serve": stage_serve, "status": lambda project, args: stage_status(project),
+    "status": lambda project, args: stage_status(project),
     "extract": stage_extract, "mine": stage_mine, "check": stage_check,
     "finalize": stage_finalize, "train": stage_train, "evaluate": stage_evaluate,
     "purge-domain": stage_purge,
@@ -313,9 +291,6 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as error:
         print(f"配置错误：{error}", file=sys.stderr)
         return 2
-    if args.stage == "serve":
-        stage_status(project)
-        print()
     return DISPATCH[args.stage](project, args)
 
 

@@ -1,8 +1,8 @@
 """One project file for the whole workbench, and the defaults behind it.
 
 Every stage used to be reached by a command line carrying dozens of flags, and
-the daily ones (serve, check) additionally made the reviewer retype the same
-four paths — getting ``--review`` wrong there silently changed which answers
+the daily checks additionally made the reviewer retype the same four paths —
+getting ``--review`` wrong there silently changed which answers
 the conflict engine could see. So the paths are stated once, the tuning lives
 in named sections with defaults that live in code, and the stages take no
 arguments at all.
@@ -17,7 +17,6 @@ a key in ``reid.yaml``. Sections are grouped by *who owns the decision*:
 ``crops``       what makes a crop trustworthy: purity, quality, sampling
 ``pairs``       what makes two crops evidence
 ``mine``        candidate ranking
-``serve``       the review web app
 ``train``       the handoff to an external trainer (paths only, never its hyperparameters)
 ``evaluate``    the handoff to an external evaluator (paths only, never a metric definition)
 ``models``      named model checkpoints a pipeline script may look up by name
@@ -84,7 +83,6 @@ DEFAULTS: dict[str, dict] = {
         "reid_onnx": "", "reid_input_size": 224, "reid_preprocess": "letterbox-bgr",
         "reid_provider": "auto", "reid_batch_size": 64,
     },
-    "serve": {"host": "127.0.0.1", "port": 8000},
     # Only the handoff itself. A backbone or a learning rate is not a property
     # of a dataset, so it is not a key of this tool -- see RETIRED below.
     "train": {
@@ -131,7 +129,6 @@ RETIRED: dict[str, tuple[frozenset[str], str]] = {
 STAGE_SECTIONS = {
     "extract": ("extract", "splits", "projection", "crops", "pairs"),
     "mine": ("mine",),
-    "serve": ("serve",),
     "train": ("train",),
     "evaluate": ("evaluate",),
 }
@@ -139,6 +136,7 @@ STAGE_SECTIONS = {
 
 # Sections whose keys this tool does not own and therefore cannot validate.
 OPEN_SECTIONS = ("pipeline", "models")
+RETIRED_SECTIONS = frozenset({"serve"})
 
 
 class ConfigError(RuntimeError):
@@ -199,13 +197,15 @@ def load(path: Path) -> "Project":
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: the project file must be a YAML mapping")
-    unknown = sorted(set(raw) - set(DEFAULTS) - {"dataset"})
+    unknown = sorted(set(raw) - set(DEFAULTS) - {"dataset"} - RETIRED_SECTIONS)
     if unknown:
         raise ConfigError(f"{path}: unknown sections {unknown}; "
                           f"known: {sorted(['dataset', *DEFAULTS])}")
     merged = {name: {**values} for name, values in DEFAULTS.items()}
     for name, values in raw.items():
         if name == "dataset":
+            continue
+        if name in RETIRED_SECTIONS:
             continue
         if not isinstance(values, dict):
             raise ConfigError(f"{path}: section `{name}` must be a mapping")

@@ -1,5 +1,5 @@
-"""One background job at a time, wrapping app.py's DISPATCH stages so the web
-UI and the CLI can never drift -- a job is exactly a CLI invocation, run off
+"""One background job at a time, wrapping app.py's DISPATCH stages so the platform
+API and the CLI can never drift -- a job is exactly a CLI invocation, run off
 the request thread instead of blocking it.
 
 Only one job runs at a time, by design, not as a temporary limitation:
@@ -10,9 +10,8 @@ Only one job runs at a time, by design, not as a temporary limitation:
 - extract/mine/train are already whole-machine, single-process operations;
   nothing about running two of them at once against one dataset is meaningful.
 
-`serve` is deliberately never dispatched here: it blocks forever
-(`serve_forever()`), which would permanently wedge the one worker this module
-runs.
+The execution gate is process-wide because stdout capture and whole-machine model
+work cannot safely overlap even when two different projects are registered.
 """
 
 from __future__ import annotations
@@ -31,10 +30,11 @@ from .core import atomic_write_json
 
 # extract/mine/train are long-running or subprocess-blocking (see the stage
 # table in the project plan); check/finalize/purge-domain are fast but still
-# worth routing through here so the web UI has one uniform "run a stage, watch
-# it finish" surface. `status` is cheap enough to stay a plain GET route
-# (server.py calls it directly); `serve`/`init` are never jobs -- see above.
+# worth routing through here so the platform has one uniform "run a stage,
+# watch it finish" surface. `status` is cheap enough to remain project metadata;
+# `init` is never a job because registered projects already have configuration.
 JOB_STAGES = ("extract", "mine", "check", "finalize", "train", "evaluate", "purge-domain")
+_EXECUTION_GATE = threading.Lock()
 
 
 class JobBusyError(RuntimeError):
@@ -90,9 +90,9 @@ class JobRunner:
                 job = Job.from_dict(value)
             except (OSError, json.JSONDecodeError, KeyError):
                 continue
-            if job.status == "running":
+            if job.status in {"queued", "running"}:
                 job.status = "failed"
-                job.error = "interrupted: server restarted while this job was running"
+                job.error = "interrupted: platform restarted before this job finished"
                 job.finished_at = job.finished_at or datetime.now().astimezone().isoformat()
                 self._persist(job)
             found.append(job)
@@ -132,26 +132,40 @@ class JobRunner:
                 raise JobBusyError(
                     f"a job is already running ({running.id if running else '?'}); "
                     "wait for it to finish")
+            if not _EXECUTION_GATE.acquire(blocking=False):
+                raise JobBusyError(
+                    "another project action is already running; wait for it to finish"
+                )
             job = Job(id=uuid.uuid4().hex[:12], stage=stage,
-                     created_at=datetime.now().astimezone().isoformat())
+                      created_at=datetime.now().astimezone().isoformat())
             self.jobs[job.id] = job
             self._order.append(job.id)
             self._busy = True
-        args.sink = job.log.append
-        self._persist(job)
-        thread = threading.Thread(target=self._run, args=(job, stage, project, args), daemon=True)
-        self._threads[job.id] = thread
-        thread.start()
+        try:
+            args.sink = job.log.append
+            self._persist(job)
+            thread = threading.Thread(
+                target=self._run, args=(job, stage, project, args), daemon=True
+            )
+            self._threads[job.id] = thread
+            thread.start()
+        except Exception:
+            with self.lock:
+                self._busy = False
+                self.jobs.pop(job.id, None)
+                self._order.remove(job.id)
+            _EXECUTION_GATE.release()
+            raise
         return job
 
     def _run(self, job: Job, stage: str, project, args) -> None:
         from .app import DISPATCH
 
-        job.status = "running"
-        job.started_at = datetime.now().astimezone().isoformat()
-        self._persist(job)
         buffer = io.StringIO()
         try:
+            job.status = "running"
+            job.started_at = datetime.now().astimezone().isoformat()
+            self._persist(job)
             with contextlib.redirect_stdout(buffer):
                 exit_code = DISPATCH[stage](project, args)
             job.result = {"exit_code": exit_code}
@@ -175,7 +189,10 @@ class JobRunner:
             job.finished_at = datetime.now().astimezone().isoformat()
             with self.lock:
                 self._busy = False
-            self._persist(job)
+            try:
+                self._persist(job)
+            finally:
+                _EXECUTION_GATE.release()
 
     def _persist(self, job: Job) -> None:
         atomic_write_json(self.jobs_dir / f"{job.id}.json", job.to_dict())

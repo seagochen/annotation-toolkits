@@ -172,6 +172,34 @@ h1 { margin: 0; font-size: clamp(2.2rem, 6vw, 4.8rem); line-height: 0.98; letter
 .submit-error div { display: flex; flex-shrink: 0; gap: 8px; }
 .submit-error button { padding: 7px 10px; border: 1px solid #b96650; border-radius: 8px; color: #7e2f20; background: transparent; cursor: pointer; }
 .review-complete h1 { font-size: clamp(2rem, 6vw, 4rem); }
+.actions-panel {
+  margin-top: 18px;
+  padding: 28px;
+  border: 1px solid rgba(23, 33, 27, 0.12);
+  border-radius: 20px;
+  background: #f8f8f3;
+  box-shadow: 0 14px 42px rgba(39, 52, 42, 0.06);
+}
+.actions-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.actions-heading h2 { margin: 0; }
+.secondary-button { padding: 9px 12px; border: 1px solid #aeb9b1; border-radius: 9px; color: #284b3a; background: transparent; cursor: pointer; }
+.action-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 22px; }
+.action-grid button { display: grid; gap: 4px; padding: 13px; border: 1px solid #bec8c0; border-radius: 11px; color: #173d2d; background: white; cursor: pointer; text-align: left; }
+.action-grid button:disabled { cursor: not-allowed; opacity: 0.5; }
+.action-grid small { color: #78837b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.action-options { display: flex; flex-wrap: wrap; gap: 18px; margin: 16px 0 22px; color: #606e64; font-size: 0.82rem; }
+.action-options label { display: flex; align-items: center; gap: 7px; }
+.job-history { display: grid; gap: 10px; }
+.job-history > p { color: #738077; }
+.job-card { padding: 14px; border-left: 4px solid #909d94; border-radius: 8px; background: #eef1e8; }
+.job-card > div { display: flex; justify-content: space-between; gap: 14px; }
+.job-card span { color: #6c786f; font: 700 0.76rem ui-monospace, monospace; text-transform: uppercase; }
+.job-card pre { max-height: 220px; overflow: auto; padding: 10px; color: #dce8df; background: #17211b; font-size: 0.75rem; white-space: pre-wrap; }
+.job-card code { display: block; margin-top: 9px; overflow-wrap: anywhere; }
+.job-done { border-left-color: #367252; }
+.job-failed { border-left-color: #b84c2e; }
+.job-running, .job-queued { border-left-color: #c38830; }
+.inline-error { padding: 9px 11px; border-radius: 8px; color: #842f20; background: #f5ddd4; overflow-wrap: anywhere; }
 
 @media (max-width: 680px) {
   .brand small { display: none; }
@@ -185,6 +213,8 @@ h1 { margin: 0; font-size: clamp(2.2rem, 6vw, 4.8rem); line-height: 0.98; letter
   .identity-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .verdict-grid { grid-template-columns: 1fr; }
   .submit-error { align-items: stretch; flex-direction: column; }
+  .actions-heading { align-items: flex-start; flex-direction: column; }
+  .action-grid { grid-template-columns: 1fr; }
   .state-panel { padding: 28px 18px; }
 }
 

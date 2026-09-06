@@ -9,7 +9,7 @@ host owns the loop and the data contract, the script owns the models.
 
 This tool starts where the tracker stops. It takes the boxes, cuts the crops,
 applies the geometry and purity rules that make a crop trustworthy evidence,
-builds the dataset structure, serves the annotation app, and writes the
+builds the dataset structure, exposes it to the annotation platform, and writes the
 answers back.
 
 A pipeline script must define::

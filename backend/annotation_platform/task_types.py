@@ -113,6 +113,25 @@ class ExportResult:
     metadata: Mapping[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ActionRequest:
+    name: str
+    options: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ActionRecord:
+    id: str
+    name: str
+    state: str
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    log: tuple[str, ...] = ()
+    result: Mapping[str, object] | None = None
+    error: str | None = None
+
+
 @runtime_checkable
 class TaskTypeModule(Protocol):
     """Minimal capability surface implemented by every annotation task type."""
@@ -128,6 +147,21 @@ class TaskTypeModule(Protocol):
     def status(self, project: TaskProject) -> TaskStatus: ...
 
     def export(self, project: TaskProject, request: ExportRequest) -> ExportResult: ...
+
+
+@runtime_checkable
+class TaskActionModule(Protocol):
+    """Optional control-plane capability for task types with executable actions."""
+
+    def action_names(self) -> tuple[str, ...]: ...
+
+    def start_action(
+        self, project: TaskProject, request: ActionRequest
+    ) -> ActionRecord: ...
+
+    def list_actions(self, project: TaskProject) -> tuple[ActionRecord, ...]: ...
+
+    def get_action(self, project: TaskProject, action_id: str) -> ActionRecord | None: ...
 
 
 class TaskTypeRegistry:

@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 from reid_annotation_tool import config as reid_config
 from reid_annotation_tool.app import latest_pairs
-from reid_annotation_tool.server import LabelConflictError, Store
+from reid_annotation_tool.jobs import Job, JobBusyError, JobRunner
+from reid_annotation_tool.review_store import LabelConflictError, Store
 
 from .task_types import (
+    ActionRecord,
+    ActionRequest,
     ExportRequest,
     ExportResult,
     QueuePage,
@@ -21,9 +26,23 @@ from .task_types import (
     TaskStatus,
 )
 
+REID_ACTIONS = ("extract", "mine", "check", "finalize", "purge-domain", "train")
+ACTION_OPTIONS = {
+    "extract": frozenset(),
+    "mine": frozenset(),
+    "check": frozenset({"strict", "json"}),
+    "finalize": frozenset(),
+    "purge-domain": frozenset({"apply"}),
+    "train": frozenset({"dry_run"}),
+}
+
 
 class ReIDTaskType:
     type_name = "reid"
+
+    def __init__(self) -> None:
+        self._runners: dict[Path, JobRunner] = {}
+        self._runners_lock = threading.Lock()
 
     @staticmethod
     def _project(project: TaskProject) -> reid_config.Project:
@@ -121,3 +140,65 @@ class ReIDTaskType:
             artifacts=(artifact,),
             metadata={"dataset": str(reid_project.dataset)},
         )
+
+    def action_names(self) -> tuple[str, ...]:
+        return REID_ACTIONS
+
+    def _runner(self, project: TaskProject) -> JobRunner:
+        root = project.root.resolve()
+        with self._runners_lock:
+            runner = self._runners.get(root)
+            if runner is None:
+                runner = JobRunner(root / ".jobs")
+                self._runners[root] = runner
+            return runner
+
+    @staticmethod
+    def _record(job: Job) -> ActionRecord:
+        return ActionRecord(
+            id=job.id,
+            name=job.stage,
+            state=job.status,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            log=tuple(job.log),
+            result=job.result,
+            error=job.error,
+        )
+
+    def start_action(
+        self, project: TaskProject, request: ActionRequest
+    ) -> ActionRecord:
+        if request.name not in ACTION_OPTIONS:
+            raise TaskOperationError(f"unknown reid action {request.name!r}")
+        unknown = sorted(set(request.options) - ACTION_OPTIONS[request.name])
+        if unknown:
+            raise TaskOperationError(
+                f"unsupported options for {request.name!r}: {unknown}"
+            )
+        for key, value in request.options.items():
+            if not isinstance(value, bool):
+                raise TaskOperationError(f"action option {key!r} must be boolean")
+        args = SimpleNamespace(
+            dry_run=bool(request.options.get("dry_run", False)),
+            apply=bool(request.options.get("apply", False)),
+            strict=bool(request.options.get("strict", False)),
+            json=bool(request.options.get("json", False)),
+        )
+        try:
+            job = self._runner(project).start(
+                request.name, self._project(project), args
+            )
+        except JobBusyError as error:
+            raise TaskConflictError(str(error)) from error
+        except (OSError, ValueError) as error:
+            raise TaskOperationError(str(error)) from error
+        return self._record(job)
+
+    def list_actions(self, project: TaskProject) -> tuple[ActionRecord, ...]:
+        return tuple(self._record(job) for job in self._runner(project).list())
+
+    def get_action(self, project: TaskProject, action_id: str) -> ActionRecord | None:
+        job = self._runner(project).get(action_id)
+        return self._record(job) if job is not None else None
