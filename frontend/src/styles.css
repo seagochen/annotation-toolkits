@@ -45,6 +45,7 @@ button { font: inherit; }
   letter-spacing: 0.04em;
 }
 .local-badge { padding: 7px 11px; color: #285642; background: #dce8d7; }
+.site-nav { display: flex; align-items: center; gap: 16px; }
 main { width: min(1160px, calc(100% - 48px)); margin: 0 auto; padding: 72px 0; }
 .hero { max-width: 720px; margin-bottom: 42px; }
 .eyebrow {
@@ -214,6 +215,16 @@ h1 { margin: 0; font-size: clamp(2.2rem, 6vw, 4.8rem); line-height: 0.98; letter
 .classification-submit { width: 100%; margin-top: 18px; padding: 12px; border: 0; border-radius: 10px; color: white; background: #173d2d; font-weight: 800; cursor: pointer; }
 .classification-submit:disabled { cursor: not-allowed; opacity: 0.5; }
 .label-selector .submit-error { align-items: stretch; flex-direction: column; }
+.canvas-demo-page { display: grid; gap: 20px; }
+.canvas-demo-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; }
+.canvas-demo-heading h1 { font-size: clamp(2.5rem, 6vw, 4.5rem); }
+.canvas-demo-heading p:last-child { max-width: 620px; color: #647168; line-height: 1.6; }
+.canvas-demo-toolbar { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.canvas-demo-toolbar button, .canvas-demo-toolbar label { padding: 9px 11px; border: 1px solid #b9c3bb; border-radius: 9px; background: #f8f8f3; cursor: pointer; }
+.canvas-demo-toolbar button.selected { color: white; background: #315b47; }
+.canvas-demo-toolbar label { display: flex; align-items: center; gap: 6px; }
+.canvas-demo-stage { height: min(66vh, 680px); min-height: 420px; overflow: hidden; border: 1px solid rgba(23, 33, 27, 0.18); border-radius: 20px; box-shadow: 0 18px 50px rgba(39, 52, 42, 0.15); }
+.canvas-demo-meta { display: flex; justify-content: space-between; gap: 18px; color: #667269; font: 0.78rem ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 @media (max-width: 680px) {
   .brand small { display: none; }
@@ -231,6 +242,10 @@ h1 { margin: 0; font-size: clamp(2.2rem, 6vw, 4.8rem); line-height: 0.98; letter
   .action-grid { grid-template-columns: 1fr; }
   .classification-grid { grid-template-columns: 1fr; }
   .classification-image { min-height: 360px; }
+  .canvas-demo-heading { align-items: stretch; flex-direction: column; }
+  .canvas-demo-toolbar { justify-content: flex-start; }
+  .canvas-demo-stage { min-height: 360px; }
+  .canvas-demo-meta { flex-direction: column; }
   .state-panel { padding: 28px 18px; }
 }
 

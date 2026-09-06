@@ -1,7 +1,11 @@
 # Annotation Toolkits Frontend
 
-本地多任务标注平台的 React/TypeScript 前端。当前包含项目列表和项目详情，标注工作台由
-后续任务类型 issue 接入。
+本地多任务标注平台的 React/TypeScript 前端。当前包含项目列表、项目详情、ReID 与图像
+分类工作台，以及供检测、分割和深度任务复用的图像画布原语。
+
+共享画布的坐标、图层、输入事件和快捷键契约见
+[`src/components/image-canvas/README.md`](src/components/image-canvas/README.md)。运行开发服务后
+访问 `/canvas-demo` 可查看静态图像、多 overlay 合成、缩放、平移和工具坐标演示。
 
 ## 开发
 

@@ -1,5 +1,6 @@
 import { Link, Route, Switch } from "wouter";
 
+import { CanvasDemoPage } from "./pages/CanvasDemoPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { ProjectListPage } from "./pages/ProjectListPage";
 import { ClassificationReviewPage } from "./tasks/classification/ClassificationReviewPage";
@@ -28,11 +29,15 @@ export function App() {
             <small>Local annotation workspace</small>
           </span>
         </Link>
-        <span className="local-badge">本地模式</span>
+        <nav className="site-nav" aria-label="主导航">
+          <Link className="text-link" to="/canvas-demo">画布 Demo</Link>
+          <span className="local-badge">本地模式</span>
+        </nav>
       </header>
       <main>
         <Switch>
           <Route path="/" component={ProjectListPage} />
+          <Route path="/canvas-demo" component={CanvasDemoPage} />
           <Route path="/projects/:projectId/classify" component={ClassificationReviewPage} />
           <Route path="/projects/:projectId/review" component={ReIDReviewPage} />
           <Route path="/projects/:projectId" component={ProjectDetailPage} />
