@@ -87,13 +87,17 @@ class ProjectRegistry:
     def list_projects(self) -> list[dict]:
         return [entry.describe() for entry in self._entries.values()]
 
-    def load_project(self, project_id: str) -> project_config.Project:
+    def get_entry(self, project_id: str) -> RegisteredProject:
+        """Return platform metadata and the loaded task project together."""
         try:
-            return self._entries[project_id].project
+            return self._entries[project_id]
         except KeyError:
             raise RegistryError(
                 f"unknown project {project_id!r}; available: {sorted(self._entries)}"
             ) from None
+
+    def load_project(self, project_id: str) -> project_config.Project:
+        return self.get_entry(project_id).project
 
 
 def _read_entries(source: Path) -> list[tuple[dict, Path]]:

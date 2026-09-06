@@ -30,7 +30,7 @@ React 前端和统一 API 尚在建设中；现阶段 ReID 继续通过原有本
 | 原子写入、审计与训练清单 | 可用 |
 | 后端/前端目录边界 | 建设中 |
 | 多项目 Python 注册表 | 可用 |
-| 多项目统一 HTTP API | 规划中 |
+| 多项目统一 HTTP API | 可用（项目查询） |
 | React 标注界面 | 规划中 |
 | 分类、检测、分割、文本、描述和深度任务 | 规划中 |
 
@@ -53,6 +53,17 @@ $EDITOR reid.yaml
 python backend/app.py status
 python backend/app.py
 ```
+
+启动统一项目 API（注册表格式见 `backend/configs/projects.example.yaml`）：
+
+```bash
+export ANNOTATION_PROJECTS_CONFIG=backend/configs/projects.example.yaml
+uvicorn annotation_platform.server:app --app-dir backend --reload
+```
+
+服务默认监听 `127.0.0.1:8000`，接口文档位于 `http://127.0.0.1:8000/docs`。开发环境
+CORS 默认只允许 `http://localhost:5173` 和 `http://127.0.0.1:5173`；需要其他明确来源时，
+通过逗号分隔的 `ANNOTATION_CORS_ORIGINS` 配置，不接受 `*`。
 
 需要执行视频抽取和候选挖掘时，安装完整可选依赖：
 
