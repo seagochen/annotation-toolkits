@@ -34,5 +34,5 @@ Thumbs.db
 
 # Site-specific pipelines contain local dataset/model/device paths. Keep only
 # the portable Ultralytics example as a reviewed, versioned starting point.
-/pipeline/*
-!/pipeline/pipeline.demo.py
+/backend/pipeline/*
+!/backend/pipeline/pipeline.demo.py
