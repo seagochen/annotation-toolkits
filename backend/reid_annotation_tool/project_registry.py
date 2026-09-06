@@ -11,14 +11,19 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
-from . import config as project_config
-
-SUPPORTED_TASK_TYPES = frozenset({"reid"})
 ENTRY_KEYS = frozenset({"id", "name", "task_type", "config"})
 PROJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+if TYPE_CHECKING:
+    from annotation_platform.task_types import (
+        TaskProject,
+        TaskTypeModule,
+        TaskTypeRegistry,
+    )
 
 
 class RegistryError(RuntimeError):
@@ -29,30 +34,22 @@ class RegistryError(RuntimeError):
 class RegisteredProject:
     id: str
     name: str
-    task_type: str
     config_path: Path
-    project: project_config.Project
+    project: "TaskProject"
+    module: "TaskTypeModule"
+
+    @property
+    def task_type(self) -> str:
+        return self.module.type_name
 
     def describe(self) -> dict:
         return {
             "id": self.id,
             "name": self.name,
             "task_type": self.task_type,
-            "root": str(self.project.dataset),
-            "status": project_status(self.project),
+            "root": str(self.project.root),
+            "status": self.module.status(self.project).state,
         }
-
-
-def project_status(project: project_config.Project) -> str:
-    """A small task-independent status vocabulary for the project list."""
-    status = project.summary()
-    if not status["exists"]:
-        return "missing"
-    if not status["identities"]:
-        return "empty"
-    if not status["live_round"]:
-        return "needs_mining"
-    return "reviewing" if status["pending"] else "reviewed"
 
 
 class ProjectRegistry:
@@ -63,18 +60,26 @@ class ProjectRegistry:
         self._entries = {entry.id: entry for entry in entries}
 
     @classmethod
-    def load(cls, path: str | Path) -> "ProjectRegistry":
+    def load(
+        cls,
+        path: str | Path,
+        task_types: "TaskTypeRegistry | None" = None,
+    ) -> "ProjectRegistry":
+        if task_types is None:
+            from annotation_platform.task_types import default_task_types
+
+            task_types = default_task_types()
         source = Path(path).expanduser().resolve()
         raw_entries = _read_entries(source)
         entries: list[RegisteredProject] = []
         ids: set[str] = set()
         roots: dict[Path, str] = {}
         for raw, owner in raw_entries:
-            entry = _load_entry(raw, owner)
+            entry = _load_entry(raw, owner, task_types)
             if entry.id in ids:
                 raise RegistryError(f"{source}: duplicate project id {entry.id!r}")
             ids.add(entry.id)
-            root = entry.project.dataset.resolve()
+            root = entry.project.root.resolve()
             if root in roots:
                 raise RegistryError(
                     f"{source}: projects {roots[root]!r} and {entry.id!r} "
@@ -96,8 +101,9 @@ class ProjectRegistry:
                 f"unknown project {project_id!r}; available: {sorted(self._entries)}"
             ) from None
 
-    def load_project(self, project_id: str) -> project_config.Project:
-        return self.get_entry(project_id).project
+    def load_project(self, project_id: str) -> object:
+        """Return the module-owned value for compatibility with existing callers."""
+        return self.get_entry(project_id).project.value
 
 
 def _read_entries(source: Path) -> list[tuple[dict, Path]]:
@@ -134,7 +140,9 @@ def _required_text(raw: dict, key: str, owner: Path) -> str:
     return value.strip()
 
 
-def _load_entry(raw: object, owner: Path) -> RegisteredProject:
+def _load_entry(
+    raw: object, owner: Path, task_types: "TaskTypeRegistry"
+) -> RegisteredProject:
     if not isinstance(raw, dict):
         raise RegistryError(f"{owner}: each project entry must be a mapping")
     unknown = sorted(set(raw) - ENTRY_KEYS)
@@ -145,17 +153,24 @@ def _load_entry(raw: object, owner: Path) -> RegisteredProject:
         raise RegistryError(f"{owner}: invalid project id {project_id!r}")
     name = _required_text(raw, "name", owner)
     task_type = _required_text(raw, "task_type", owner)
-    if task_type not in SUPPORTED_TASK_TYPES:
-        raise RegistryError(
-            f"{owner}: unknown task type {task_type!r}; supported: {sorted(SUPPORTED_TASK_TYPES)}"
-        )
-    config_path = project_config.resolve(owner.parent, _required_text(raw, "config", owner))
+    from annotation_platform.task_types import UnknownTaskTypeError
+
+    try:
+        module = task_types.require(task_type)
+    except UnknownTaskTypeError as error:
+        raise RegistryError(f"{owner}: {error}") from error
+    configured_path = Path(_required_text(raw, "config", owner)).expanduser()
+    config_path = (
+        configured_path
+        if configured_path.is_absolute()
+        else (owner.parent / configured_path).resolve()
+    )
     if not config_path.is_file():
         raise RegistryError(f"{owner}: project config not found: {config_path}")
+    from annotation_platform.task_types import TaskOperationError
+
     try:
-        project = project_config.load(config_path)
-    except project_config.ConfigError as error:
+        project = module.load(config_path)
+    except TaskOperationError as error:
         raise RegistryError(f"{owner}: invalid project config: {error}") from error
-    if project.dataset.exists() and not project.dataset.is_dir():
-        raise RegistryError(f"{owner}: dataset root is not a directory: {project.dataset}")
-    return RegisteredProject(project_id, name, task_type, config_path, project)
+    return RegisteredProject(project_id, name, config_path, project, module)

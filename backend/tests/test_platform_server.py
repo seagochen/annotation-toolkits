@@ -5,6 +5,17 @@ import httpx
 import pytest
 
 from annotation_platform.server import create_app
+from annotation_platform.task_types import (
+    ExportRequest,
+    ExportResult,
+    QueuePage,
+    QueueRequest,
+    Submission,
+    SubmissionResult,
+    TaskProject,
+    TaskStatus,
+    TaskTypeRegistry,
+)
 
 
 def make_registry(tmp_path: Path) -> Path:
@@ -122,3 +133,49 @@ def test_cors_allows_only_configured_local_origin(tmp_path):
 def test_wildcard_cors_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="must be explicit"):
         create_app(make_registry(tmp_path), cors_origins=["*"])
+
+
+def test_project_endpoints_take_type_and_status_from_task_adapter(tmp_path):
+    class DemoTask:
+        type_name = "demo"
+
+        def load(self, config_path: Path) -> TaskProject:
+            return TaskProject(config_path, tmp_path / "demo-data", object())
+
+        def queue(self, project: TaskProject, request: QueueRequest) -> QueuePage:
+            return QueuePage(0, request.offset, request.limit, ())
+
+        def submit(
+            self, project: TaskProject, submission: Submission
+        ) -> SubmissionResult:
+            raise NotImplementedError
+
+        def status(self, project: TaskProject) -> TaskStatus:
+            return TaskStatus("ready", {"items": 7})
+
+        def export(
+            self, project: TaskProject, request: ExportRequest
+        ) -> ExportResult:
+            return ExportResult(request.format, ())
+
+    config = tmp_path / "demo.yaml"
+    config.write_text("demo: true\n", encoding="utf-8")
+    registry = tmp_path / "projects.yaml"
+    registry.write_text(
+        "projects:\n"
+        "  - id: custom\n"
+        "    name: Custom\n"
+        "    task_type: demo\n"
+        "    config: ./demo.yaml\n",
+        encoding="utf-8",
+    )
+    app = create_app(
+        registry,
+        task_types=TaskTypeRegistry((DemoTask(),)),
+    )
+
+    listing = request(app, "GET", "/api/projects").json()
+    assert listing[0]["task_type"] == "demo"
+    assert listing[0]["status"] == "ready"
+    detail = request(app, "GET", "/api/projects/custom").json()
+    assert detail["summary"] == {"items": 7}

@@ -682,8 +682,31 @@ projects:
 
 注册表路径按 `projects.yaml` 所在目录解析。也可以传入一个目录，将其中每个
 `*.yaml`/`*.yml` 视为单独的项目条目。Python 层使用
-`ProjectRegistry.load(path).list_projects()` 和 `load_project(id)`；HTTP 接口由后续
-Issue 提供。完整示例见 `configs/projects.example.yaml`。
+`ProjectRegistry.load(path).list_projects()` 和 `load_project(id)`；统一 HTTP 接口使用
+`GET /api/projects` 和 `GET /api/projects/{id}`。完整示例见
+`configs/projects.example.yaml`。
+
+### 任务类型插件
+
+平台通过 `annotation_platform.task_types.TaskTypeModule` 隔离不同标注任务。模块首先用
+`load(config_path)` 将自己的配置装入通用 `TaskProject`，再实现四项任务能力：
+
+| 方法 | 通用语义 |
+| --- | --- |
+| `queue(project, request)` | 按分页和任务自有过滤条件返回待处理项 |
+| `submit(project, submission)` | 为一个队列项原子保存结构化标注结果 |
+| `status(project)` | 返回通用状态名和任务自有详情 |
+| `export(project, request)` | 返回指定格式的本地产物及元数据 |
+
+请求与结果分别使用 `QueueRequest` / `QueuePage`、`Submission` /
+`SubmissionResult`、`TaskStatus`、`ExportRequest` / `ExportResult`，平台层不解释标签、
+框、掩码等任务专属字段。错误统一继承 `TaskTypeError`：非法实现、重复名称、未知类型和
+操作失败分别有稳定的异常类型及 `code`。
+
+`TaskTypeRegistry` 在注册时要求小写唯一的 `type_name`，并检查上述五个方法是否可调用。
+内置注册表当前只有 `reid`；其适配器复用现有 `Store` 的队列筛选与原子 CSV 写入、
+`Project.summary()` 状态和当前 pairs 产物，没有复制 ReID 领域规则。新增任务类型时，先实现
+该协议，再注入项目注册表或 FastAPI 的 `create_app(task_types=...)`。
 
 `reid.yaml`（`python app.py init` 生成，完整示例见 `configs/reid.example.yaml`）
 按"谁拥有这个决定"分节：

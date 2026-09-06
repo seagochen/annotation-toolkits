@@ -12,6 +12,8 @@ from pydantic import BaseModel
 
 from reid_annotation_tool.project_registry import ProjectRegistry, RegistryError
 
+from .task_types import TaskTypeRegistry, default_task_types
+
 DEFAULT_REGISTRY_PATH = "projects.yaml"
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
@@ -27,21 +29,8 @@ class ProjectListItem(BaseModel):
     status: str
 
 
-class ProjectSummary(BaseModel):
-    config: str
-    dataset: str
-    exists: bool
-    identities: int
-    tracks: int
-    pairs: int
-    rounds: list[str]
-    live_round: str
-    labelled: int
-    pending: int
-
-
 class ProjectDetail(ProjectListItem):
-    summary: ProjectSummary
+    summary: dict[str, object]
 
 
 class ErrorDetail(BaseModel):
@@ -62,7 +51,9 @@ def _configured_origins() -> list[str]:
 
 async def _registry(request: Request) -> ProjectRegistry:
     try:
-        return ProjectRegistry.load(request.app.state.registry_path)
+        return ProjectRegistry.load(
+            request.app.state.registry_path, request.app.state.task_types
+        )
     except RegistryError as error:
         raise HTTPException(
             status_code=500,
@@ -76,6 +67,7 @@ Registry = Annotated[ProjectRegistry, Depends(_registry)]
 def create_app(
     registry_path: str | Path | None = None,
     cors_origins: list[str] | tuple[str, ...] | None = None,
+    task_types: TaskTypeRegistry | None = None,
 ) -> FastAPI:
     """Build the API without loading project data until a request needs it."""
     origins = list(cors_origins) if cors_origins is not None else _configured_origins()
@@ -92,6 +84,7 @@ def create_app(
         if registry_path is not None
         else os.environ.get("ANNOTATION_PROJECTS_CONFIG", DEFAULT_REGISTRY_PATH)
     )
+    application.state.task_types = task_types or default_task_types()
     application.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -121,7 +114,15 @@ def create_app(
                 status_code=404,
                 detail={"code": "project_not_found", "message": str(error)},
             ) from error
-        return {**entry.describe(), "summary": entry.project.summary()}
+        task_status = entry.module.status(entry.project)
+        return {
+            "id": entry.id,
+            "name": entry.name,
+            "task_type": entry.task_type,
+            "root": str(entry.project.root),
+            "status": task_status.state,
+            "summary": task_status.details,
+        }
 
     return application
 

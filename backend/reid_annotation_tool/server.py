@@ -227,6 +227,31 @@ class Store:
             "conflicts": self.conflict_summary(),
         }
 
+    def queue(self, *, kind: str = "", split: str = "", status: str = "",
+              search: str = "", offset: int = 0, limit: int = 60) -> dict:
+        """Return one filtered page; shared by the legacy and platform adapters."""
+        selected = []
+        for row in self.rows():
+            label = row.get("review_label", "")
+            if kind and row.get("kind", "cross_track") != kind:
+                continue
+            if split and row.get("split") != split:
+                continue
+            if status == "pending" and label:
+                continue
+            if status in REVIEW_LABELS and status and label != status:
+                continue
+            if search and search.lower() not in json.dumps(
+                row, ensure_ascii=False
+            ).lower():
+                continue
+            selected.append(row)
+        page = selected[offset:offset + limit]
+        return {
+            "total": len(selected), "offset": offset, "limit": limit,
+            "rows": [self.decorate(row) for row in page],
+        }
+
     def invalidate_conflicts(self) -> None:
         """Mark the cached report stale and refresh it off the request thread.
 
@@ -419,30 +444,16 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self.send_error(400, str(error))
 
     def candidates(self, query: dict[str, list[str]]) -> dict:
-        rows = self.store.rows()
-        kind = query.get("kind", [""])[0]
-        split = query.get("split", [""])[0]
-        status = query.get("status", [""])[0]
-        search = query.get("q", [""])[0].strip().lower()
-        selected = []
-        for row in rows:
-            label = row.get("review_label", "")
-            if kind and row.get("kind", "cross_track") != kind:
-                continue
-            if split and row.get("split") != split:
-                continue
-            if status == "pending" and label:
-                continue
-            if status in REVIEW_LABELS and status and label != status:
-                continue
-            if search and search not in json.dumps(row, ensure_ascii=False).lower():
-                continue
-            selected.append(row)
         offset = int(query.get("offset", ["0"])[0])
         limit = min(int(query.get("limit", ["60"])[0]), 200)
-        page = selected[offset:offset + limit]
-        return {"total": len(selected), "offset": offset, "limit": limit,
-                "rows": [self.store.decorate(row) for row in page]}
+        return self.store.queue(
+            kind=query.get("kind", [""])[0],
+            split=query.get("split", [""])[0],
+            status=query.get("status", [""])[0],
+            search=query.get("q", [""])[0].strip(),
+            offset=offset,
+            limit=limit,
+        )
 
     def do_POST(self) -> None:
         route = urlparse(self.path).path
