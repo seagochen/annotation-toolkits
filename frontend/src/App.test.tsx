@@ -393,4 +393,50 @@ describe("project pages", () => {
     expect(bag).toBeChecked();
     expect(screen.getByRole("button", { name: "重试保存" })).toBeVisible();
   });
+
+  it("completes an image captioning queue", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "scenes",
+          name: "Scenes",
+          task_type: "caption",
+          root: "/data/images",
+          status: "reviewing",
+          summary: {},
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 1,
+          offset: 0,
+          limit: 1,
+          items: [{ item_id: "i1", image_path: "street.jpg", caption: "" }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          item: { item_id: "i1", image_path: "street.jpg", caption: "A busy street." },
+          status: { state: "reviewed", details: { pending: 0 } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({ total: 0, offset: 0, limit: 1, items: [] }),
+      );
+
+    renderAt("/projects/scenes/caption");
+    const textarea = await screen.findByLabelText("图像描述");
+    const submit = screen.getByRole("button", { name: "保存并继续" });
+    expect(submit).toBeDisabled();
+    fireEvent.change(textarea, { target: { value: "  A busy street.  " } });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+
+    expect(await screen.findByRole("heading", { name: "图像描述已完成" })).toBeVisible();
+    const request = fetchMock.mock.calls[2][0] as Request;
+    await expect(request.clone().json()).resolves.toEqual({
+      item_id: "i1",
+      result: { caption: "A busy street." },
+    });
+  });
 });
