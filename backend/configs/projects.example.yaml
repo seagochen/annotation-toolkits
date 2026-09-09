@@ -10,7 +10,7 @@ projects:
     config: ./classification.example.yaml
   - id: scene-caption
     name: Scene Captioning
-    task_type: caption
+    task_type: captioning
     config: ./caption.example.yaml
   - id: scene-detection
     name: Scene Detection

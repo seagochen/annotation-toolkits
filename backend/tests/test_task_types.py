@@ -75,7 +75,7 @@ def test_default_registry_contains_reid():
     assert default_task_types().names() == (
         "reid",
         "classification",
-        "caption",
+        "captioning",
         "detection",
         "segmentation",
         "depth",

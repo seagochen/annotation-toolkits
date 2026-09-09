@@ -400,7 +400,7 @@ describe("project pages", () => {
         response({
           id: "scenes",
           name: "Scenes",
-          task_type: "caption",
+          task_type: "captioning",
           root: "/data/images",
           status: "reviewing",
           summary: {},

@@ -252,7 +252,7 @@ class CaptionStore:
 
 
 class CaptionTaskType:
-    type_name = "caption"
+    type_name = "captioning"
 
     @staticmethod
     def _project(project: TaskProject) -> CaptionProject:

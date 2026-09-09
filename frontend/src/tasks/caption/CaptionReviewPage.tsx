@@ -40,7 +40,7 @@ export function CaptionReviewPage() {
         getProject(projectId),
         getQueue(projectId),
       ]);
-      if (project.task_type !== "caption") {
+      if (project.task_type !== "captioning") {
         setState({ kind: "error", message: "该项目不是图像描述任务。" });
         return;
       }

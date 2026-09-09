@@ -76,7 +76,7 @@ export function ProjectDetailPage() {
           开始图像分类 →
         </Link>
       )}
-      {project.task_type === "caption" && project.status === "reviewing" && (
+      {project.task_type === "captioning" && project.status === "reviewing" && (
         <Link className="primary-link" to={`/projects/${project.id}/caption`}>
           开始图像描述 →
         </Link>
