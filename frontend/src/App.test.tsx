@@ -553,4 +553,60 @@ describe("project pages", () => {
     });
     getContext.mockRestore();
   });
+
+  it("starts from a blank depth raster when no baseline is available", async () => {
+    class InstantImage {
+      onload: (() => void) | null = null;
+      naturalWidth = 2;
+      naturalHeight = 2;
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal("Image", InstantImage);
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(null);
+
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "tunnel",
+          name: "Tunnel",
+          task_type: "depth",
+          root: "/data/images",
+          status: "reviewing",
+          summary: {},
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 1,
+          offset: 0,
+          limit: 1,
+          items: [{ item_id: "i1", image_path: "tile.png", baseline_path: null, depth_path: null }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          item: { item_id: "i1", image_path: "tile.png", depth_path: "i1.png" },
+          status: { state: "reviewed", details: { pending: 0 } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({ total: 0, offset: 0, limit: 1, items: [] }),
+      );
+
+    renderAt("/projects/tunnel/depth");
+    expect(await screen.findByText("未找到基线深度图，已从中灰度（128）开始编辑。")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "保存并继续" }));
+
+    expect(await screen.findByRole("heading", { name: "深度图标注已完成" })).toBeVisible();
+    const request = fetchMock.mock.calls[2][0] as Request;
+    await expect(request.clone().json()).resolves.toEqual({
+      item_id: "i1",
+      result: { image_size: { width: 2, height: 2 }, pixels: "gICAgA==" },
+    });
+    getContext.mockRestore();
+  });
 });

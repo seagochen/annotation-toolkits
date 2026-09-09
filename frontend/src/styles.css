@@ -222,6 +222,7 @@ h1 { margin: 0; font-size: clamp(2.2rem, 6vw, 4.8rem); line-height: 0.98; letter
 .label-selector [role="group"] button[aria-pressed] { border: 1px solid #d3d9d1; border-radius: 10px; padding: 10px 12px; background: white; cursor: pointer; }
 .label-selector [role="group"] button[aria-pressed="true"] { border-color: #315b47; color: #173d2d; background: #e0eadf; }
 .label-selector input[type="range"] { width: 100%; }
+.submit-hint { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; color: #7a5b1f; background: #fdf3d8; font-size: 0.85rem; }
 .canvas-demo-page { display: grid; gap: 20px; }
 .canvas-demo-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; }
 .canvas-demo-heading h1 { font-size: clamp(2.5rem, 6vw, 4.5rem); }

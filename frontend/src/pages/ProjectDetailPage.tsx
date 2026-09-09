@@ -91,6 +91,11 @@ export function ProjectDetailPage() {
           开始图像分割 →
         </Link>
       )}
+      {project.task_type === "depth" && project.status === "reviewing" && (
+        <Link className="primary-link" to={`/projects/${project.id}/depth`}>
+          开始深度图标注 →
+        </Link>
+      )}
       <section className="detail-grid">
         <article className="detail-card">
           <h2>本地数据</h2>
