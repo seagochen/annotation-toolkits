@@ -21,7 +21,10 @@ extract = ["numpy>=1.24", "opencv-python>=4.8", "onnxruntime>=1.16"]
 # Only for the bundled `ultralytics` reference pipeline; a project that brings
 # its own tracking script installs whatever that script imports instead.
 ultralytics = ["ultralytics>=8.1"]
-test = ["httpx>=0.27", "pytest>=8"]
+# Pillow only verifies, in tests, that annotation_platform.imaging's
+# hand-rolled PNG encoder produces spec-correct files a real decoder can
+# read -- the runtime path never depends on it.
+test = ["httpx>=0.27", "pytest>=8", "Pillow>=10"]
 
 [project.scripts]
 reid-annotation = "reid_annotation_tool.app:main"

@@ -72,7 +72,14 @@ def test_registry_rejects_invalid_type_names():
 
 
 def test_default_registry_contains_reid():
-    assert default_task_types().names() == ("reid", "classification")
+    assert default_task_types().names() == (
+        "reid",
+        "classification",
+        "caption",
+        "detection",
+        "segmentation",
+        "depth",
+    )
 
 
 @pytest.mark.parametrize("label", ["same", "different", "unclear"])

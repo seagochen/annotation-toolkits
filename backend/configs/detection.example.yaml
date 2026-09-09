@@ -1,0 +1,16 @@
+# Bounding-box object detection project. Paths are relative to this file.
+dataset: ./example-images
+
+# Stable, ordered category list -- COCO export category ids follow this order.
+categories:
+  - person
+  - vehicle
+
+patterns:
+  - "**/*.jpg"
+  - "**/*.jpeg"
+  - "**/*.png"
+  - "**/*.webp"
+
+# Must remain inside dataset. The JSON contains current boxes and history.
+annotations: .annotations/detection.json

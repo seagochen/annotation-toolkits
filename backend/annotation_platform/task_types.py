@@ -205,7 +205,20 @@ class TaskTypeRegistry:
 
 def default_task_types() -> TaskTypeRegistry:
     """Build the platform's built-in registry without mutable global state."""
+    from .caption_task import CaptionTaskType
     from .classification_task import ClassificationTaskType
+    from .detection_task import DetectionTaskType
+    from .depth_task import DepthTaskType
     from .reid_task import ReIDTaskType
+    from .segmentation_task import SegmentationTaskType
 
-    return TaskTypeRegistry((ReIDTaskType(), ClassificationTaskType()))
+    return TaskTypeRegistry(
+        (
+            ReIDTaskType(),
+            ClassificationTaskType(),
+            CaptionTaskType(),
+            DetectionTaskType(),
+            SegmentationTaskType(),
+            DepthTaskType(),
+        )
+    )

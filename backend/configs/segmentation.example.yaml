@@ -1,0 +1,18 @@
+# Image segmentation project. Paths are relative to this file.
+dataset: ./example-images
+
+# Stable, ordered category list. Pixel value 0 is always background;
+# category N gets pixel value N (1-based, following this order).
+categories:
+  - road
+  - building
+
+patterns:
+  - "**/*.jpg"
+  - "**/*.jpeg"
+  - "**/*.png"
+  - "**/*.webp"
+
+# Must remain inside dataset. Holds index.json plus one <item_id>.png mask
+# per segmented image -- excluded from `patterns` matching automatically.
+annotations: .annotations/segmentation
