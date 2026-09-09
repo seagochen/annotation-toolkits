@@ -1,0 +1,17 @@
+# Depth-map brush annotation project. Paths are relative to this file.
+dataset: ./example-images
+
+# A precomputed baseline for image `<stem>.<ext>` is expected at
+# `<depth_maps>/<stem>.png`, mirroring the dataset's relative layout.
+# Must remain inside dataset and not overlap `annotations`.
+depth_maps: .depth-baseline
+
+patterns:
+  - "**/*.jpg"
+  - "**/*.jpeg"
+  - "**/*.png"
+  - "**/*.webp"
+
+# Holds index.json plus one edited <item_id>.png per annotated image --
+# excluded from `patterns` matching automatically, like `depth_maps`.
+annotations: .annotations/depth

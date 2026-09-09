@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reid-annotation-tool"
+version = "0.2.0"
+description = "Evidence-backed video ReID dataset extraction, annotation, auditing and retraining workbench"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = [
+    "FastAPI>=0.115,<1",
+    "PyYAML>=6",
+    "uvicorn>=0.30,<1",
+]
+
+[project.optional-dependencies]
+# Reading video, cutting crops and ranking review candidates. Reviewing,
+# auditing and finalizing an existing dataset need none of this.
+extract = ["numpy>=1.24", "opencv-python>=4.8", "onnxruntime>=1.16"]
+# Only for the bundled `ultralytics` reference pipeline; a project that brings
+# its own tracking script installs whatever that script imports instead.
+ultralytics = ["ultralytics>=8.1"]
+# Pillow only verifies, in tests, that annotation_platform.imaging's
+# hand-rolled PNG encoder produces spec-correct files a real decoder can
+# read -- the runtime path never depends on it.
+test = ["httpx>=0.27", "pytest>=8", "Pillow>=10"]
+
+[project.scripts]
+reid-annotation = "reid_annotation_tool.app:main"
+
+[tool.setuptools.packages.find]
+include = ["annotation_platform*", "reid_annotation_tool*"]
+
+[tool.setuptools.package-data]
+reid_annotation_tool = ["pipelines/*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

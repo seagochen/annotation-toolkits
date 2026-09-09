@@ -1,0 +1,26 @@
+# Platform registry. Paths are relative to this file, never to the shell cwd.
+projects:
+  - id: scene-reid
+    name: Scene ReID
+    task_type: reid
+    config: ./reid.example.yaml
+  - id: scene-classification
+    name: Scene Classification
+    task_type: classification
+    config: ./classification.example.yaml
+  - id: scene-caption
+    name: Scene Captioning
+    task_type: captioning
+    config: ./caption.example.yaml
+  - id: scene-detection
+    name: Scene Detection
+    task_type: detection
+    config: ./detection.example.yaml
+  - id: scene-segmentation
+    name: Scene Segmentation
+    task_type: segmentation
+    config: ./segmentation.example.yaml
+  - id: scene-depth
+    name: Scene Depth
+    task_type: depth
+    config: ./depth.example.yaml

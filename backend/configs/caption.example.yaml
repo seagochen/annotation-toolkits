@@ -1,0 +1,11 @@
+# Per-image free-text captioning project. Paths are relative to this file.
+dataset: ./example-images
+
+patterns:
+  - "**/*.jpg"
+  - "**/*.jpeg"
+  - "**/*.png"
+  - "**/*.webp"
+
+# Must remain inside dataset. The JSON contains current captions and history.
+annotations: .annotations/caption.json

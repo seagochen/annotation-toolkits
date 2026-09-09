@@ -1,0 +1,17 @@
+# Image-level classification project. Paths are relative to this file.
+dataset: ./example-images
+
+# `single` requires exactly one label; `multi` accepts one or more labels.
+mode: single
+labels:
+  - indoor
+  - outdoor
+
+patterns:
+  - "**/*.jpg"
+  - "**/*.jpeg"
+  - "**/*.png"
+  - "**/*.webp"
+
+# Must remain inside dataset. The JSON contains current decisions and history.
+annotations: .annotations/classification.json

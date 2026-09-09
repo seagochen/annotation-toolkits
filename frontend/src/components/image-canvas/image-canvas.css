@@ -1,0 +1,19 @@
+.image-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  overflow: hidden;
+  outline: none;
+  background: #111814;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.image-canvas:active { cursor: grabbing; }
+.image-canvas[data-interaction-mode="tool"] { cursor: crosshair; }
+.image-canvas:focus-visible { box-shadow: inset 0 0 0 3px #d28c55; }
+.image-canvas-base { position: absolute; top: 0; left: 0; max-width: none; transform-origin: 0 0; pointer-events: none; }
+.image-canvas-layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.image-canvas-controls { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; padding: 6px; border-radius: 10px; background: rgba(16, 25, 20, 0.82); }
+.image-canvas-controls button { min-width: 34px; min-height: 32px; border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 7px; color: white; background: transparent; cursor: pointer; }
