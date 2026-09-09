@@ -439,4 +439,61 @@ describe("project pages", () => {
       result: { caption: "A busy street." },
     });
   });
+
+  it("loads image dimensions and submits an empty-box detection result", async () => {
+    class InstantImage {
+      onload: (() => void) | null = null;
+      naturalWidth = 100;
+      naturalHeight = 50;
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal("Image", InstantImage);
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(null);
+
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "yard",
+          name: "Yard",
+          task_type: "detection",
+          root: "/data/images",
+          status: "reviewing",
+          summary: { categories: ["cat", "dog"] },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 1,
+          offset: 0,
+          limit: 1,
+          items: [{ item_id: "i1", image_path: "yard.jpg", boxes: [] }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          item: { item_id: "i1", image_path: "yard.jpg", image_size: { width: 100, height: 50 }, boxes: [] },
+          status: { state: "reviewed", details: { pending: 0 } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({ total: 0, offset: 0, limit: 1, items: [] }),
+      );
+
+    renderAt("/projects/yard/detect");
+    expect(await screen.findByRole("radio", { name: "cat" })).toBeVisible();
+    expect(screen.getByRole("application", { name: "yard.jpg" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "保存并继续" }));
+
+    expect(await screen.findByRole("heading", { name: "目标检测已完成" })).toBeVisible();
+    const request = fetchMock.mock.calls[2][0] as Request;
+    await expect(request.clone().json()).resolves.toEqual({
+      item_id: "i1",
+      result: { image_size: { width: 100, height: 50 }, boxes: [] },
+    });
+    getContext.mockRestore();
+  });
 });

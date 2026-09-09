@@ -17,3 +17,17 @@ export {
 export type { Point, ScaleLimits, Size, Viewport } from "./geometry";
 export { normalizeShortcutKey, resolveShortcuts } from "./shortcuts";
 export type { ShortcutBinding, ShortcutResolution } from "./shortcuts";
+export {
+  beginCreate,
+  beginMoveOrResize,
+  cancelDrag,
+  createBoxToolState,
+  deleteBox,
+  endDrag,
+  hitTestBoxes,
+  hitTestHandle,
+  previewCreateRect,
+  setCategory,
+  updateDrag,
+} from "./box-tool";
+export type { Box, BoxHandle, BoxToolState } from "./box-tool";

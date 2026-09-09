@@ -81,6 +81,11 @@ export function ProjectDetailPage() {
           开始图像描述 →
         </Link>
       )}
+      {project.task_type === "detection" && project.status === "reviewing" && (
+        <Link className="primary-link" to={`/projects/${project.id}/detect`}>
+          开始目标检测 →
+        </Link>
+      )}
       <section className="detail-grid">
         <article className="detail-card">
           <h2>本地数据</h2>

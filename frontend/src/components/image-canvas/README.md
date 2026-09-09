@@ -35,7 +35,10 @@ type ImageCanvasLayer = {
 `x/y/width/height`。每层使用独立 canvas，因此隐藏或改变 opacity/blend mode 不会污染
 其他层。render 必须同步且不得保留 context 引用。
 
-- #18 detection：一个 layer 绘制 boxes/handles，pointer event 修改 box state。
+- #18 detection：一个 layer 绘制 boxes/handles，pointer event 修改 box state，
+  由 `box-tool.ts` 提供创建/选中/移动/缩放/删除的纯函数状态机
+  （`createBoxToolState`/`beginCreate`/`beginMoveOrResize`/`updateDrag`/
+  `endDrag`/`deleteBox`），任务页面只负责渲染与提交。
 - #21 segmentation：polygon 与 raster preview 使用不同 layer，保证顺序明确。
 - #22 depth：灰度 depth raster layer 设置所需 blend mode，brush 仍接收图像坐标。
 

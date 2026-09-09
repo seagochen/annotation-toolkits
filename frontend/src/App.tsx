@@ -5,6 +5,7 @@ import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { ProjectListPage } from "./pages/ProjectListPage";
 import { CaptionReviewPage } from "./tasks/caption/CaptionReviewPage";
 import { ClassificationReviewPage } from "./tasks/classification/ClassificationReviewPage";
+import { DetectionReviewPage } from "./tasks/detection/DetectionReviewPage";
 import { ReIDReviewPage } from "./tasks/reid/ReIDReviewPage";
 
 function NotFoundPage() {
@@ -41,6 +42,7 @@ export function App() {
           <Route path="/canvas-demo" component={CanvasDemoPage} />
           <Route path="/projects/:projectId/classify" component={ClassificationReviewPage} />
           <Route path="/projects/:projectId/caption" component={CaptionReviewPage} />
+          <Route path="/projects/:projectId/detect" component={DetectionReviewPage} />
           <Route path="/projects/:projectId/review" component={ReIDReviewPage} />
           <Route path="/projects/:projectId" component={ProjectDetailPage} />
           <Route component={NotFoundPage} />
