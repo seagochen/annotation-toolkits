@@ -99,6 +99,10 @@ export function DepthReviewPage() {
     }
     let active = true;
     const baseline = new Image();
+    // The API is typically served from a different origin/port than the
+    // frontend (see README quick start); without this the canvas read in
+    // loadFromImageElement throws SecurityError on a "tainted" canvas.
+    baseline.crossOrigin = "anonymous";
     baseline.onload = () => {
       if (active) setRaster(loadFromImageElement(baseline));
     };
