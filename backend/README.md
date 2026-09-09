@@ -1,8 +1,11 @@
 # ReID Annotation Tool
 
 这是 Annotation Toolkits 当前 ReID 后端的详细使用文档。平台概览和目录说明见仓库根目录
-的 `README.md`；ReID 的导出格式契约与旧 CLI 用户的路径迁移速查见
-[`../docs/reid.md`](../docs/reid.md)。以下命令如无特别说明，均可在仓库根目录使用
+的 `README.md`；ReID 的导出格式契约见
+[`../docs/detailed_design/70_外部接口.md`](../docs/detailed_design/70_外部接口.md)，
+旧 CLI 用户的路径迁移速查见
+[`../docs/detailed_design/30_ReID流水线.md`](../docs/detailed_design/30_ReID流水线.md)
+§5。以下命令如无特别说明，均可在仓库根目录使用
 `python backend/app.py` 执行；进入 `backend/` 后可继续使用简写 `python app.py`。
 
 面向监控视频 ReID 数据集的证据驱动工作台：**接入你自己的跟踪结果 → 人工标注 →
@@ -677,7 +680,8 @@ projects:
 `depth` 六种任务类型（`annotation_platform.task_types.default_task_types()`）；`reid`
 适配器复用现有 `Store` 的队列筛选与原子 CSV 写入、`Project.summary()` 状态和当前 pairs
 产物，没有复制 ReID 领域规则。各任务类型的标注数据模型与导出格式见
-[`../docs/`](../docs/) 下对应文档。新增任务类型时，先实现该协议，再注入项目注册表或
+[`../docs/detailed_design/70_外部接口.md`](../docs/detailed_design/70_外部接口.md)。
+新增任务类型时，先实现该协议，再注入项目注册表或
 FastAPI 的 `create_app(task_types=...)`。
 
 `reid.yaml`（`python app.py init` 生成，完整示例见 `configs/reid.example.yaml`）
