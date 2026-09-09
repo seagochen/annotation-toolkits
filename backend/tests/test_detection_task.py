@@ -105,6 +105,7 @@ def test_empty_boxes_list_is_a_valid_submission(tmp_path):
     ("result", "message"),
     [
         ({"image_size": {"width": 0, "height": 50}, "boxes": []}, "positive"),
+        ({"image_size": {"width": 100.5, "height": 50}, "boxes": []}, "whole numbers"),
         ({"image_size": {"width": 100, "height": 50}, "boxes": [box(category="bird")]}, "unknown detection category"),
         (
             {"image_size": {"width": 100, "height": 50}, "boxes": [box(width=-1)]},

@@ -99,9 +99,9 @@ def _image_size(value: object) -> dict:
         raise TaskOperationError("detection result requires `image_size` with width/height")
     width = _finite_number(value["width"], "image_size.width")
     height = _finite_number(value["height"], "image_size.height")
-    if width <= 0 or height <= 0:
-        raise TaskOperationError("detection `image_size` must be positive")
-    return {"width": width, "height": height}
+    if width <= 0 or height <= 0 or width != int(width) or height != int(height):
+        raise TaskOperationError("detection `image_size` must be positive whole numbers")
+    return {"width": int(width), "height": int(height)}
 
 
 def _boxes(value: object, categories: tuple[str, ...], image_size: dict) -> list[dict]:

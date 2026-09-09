@@ -4,9 +4,9 @@
 标注交互作为产品参考，但使用自己的轻量实现，不复制或嵌入 Label Studio 源码，也不
 引入用户注册、权限控制、云存储或容器部署体系。
 
-当前可用能力是 ReID 数据提取、候选挖掘、人工审核、逻辑冲突检测、数据定版及训练交接；
-平台化迁移正在进行中，后续将在统一后端和前端框架中加入分类、检测、分割、文本、图像
-描述和深度标注。
+当前可用任务类型：ReID 数据提取/候选挖掘/人工审核/逻辑冲突检测/数据定版及训练交接、
+图像分类、图像描述、目标检测、图像分割、深度图画笔标注。文本标注的范围仍在
+[#20](https://github.com/seagochen/annotation-toolkits/issues/20) 中讨论，尚未实现。
 
 ## 架构
 
@@ -15,14 +15,15 @@ flowchart LR
     Browser[React 标注界面] --> API[Python API]
     API --> Tasks[任务类型模块]
     Tasks --> ReID[ReID]
-    Tasks --> Future[分类 / 检测 / 分割 / 其他]
-    ReID --> Files[本地 CSV / JSON / 媒体文件]
-    Future --> Files
+    Tasks --> Vision[分类 / 描述 / 检测 / 分割 / 深度]
+    ReID --> Files[本地 CSV / JSON / PNG]
+    Vision --> Files
 ```
 
-React 项目导航、ReID 成对审核、图像分类和统一 API 已可用；ReID 流水线动作也由项目
-详情页统一触发并显示持久化日志和结果。前端提供统一的原图坐标画布、独立 overlay layers
-和缩放/平移输入原语，后续检测、分割和深度工具可直接复用。
+React 项目导航、ReID 成对审核、图像分类、图像描述、目标检测、图像分割、深度图画笔和
+统一 API 均已可用；ReID 流水线动作也由项目详情页统一触发并显示持久化日志和结果。前端
+的共享图像画布（原图坐标变换、独立 overlay layers、缩放/平移）与栅格/多边形/检测框
+图元被检测、分割和深度三个任务复用，没有各自维护一套画布或像素编辑逻辑。
 
 ## 功能状态
 
@@ -36,8 +37,24 @@ React 项目导航、ReID 成对审核、图像分类和统一 API 已可用；R
 | React 项目列表和详情 | 可用 |
 | React ReID 标注界面 | 可用 |
 | 图像单标签/多标签分类 | 可用 |
+| 图像描述（captioning） | 可用 |
+| 目标检测（COCO 兼容导出） | 可用 |
+| 图像分割（画笔 + 多边形，COCO 兼容导出） | 可用 |
+| 深度图画笔标注 | 可用 |
 | 共享图像画布、overlay 与坐标变换 | 可用 |
-| 检测、分割、文本、描述和深度任务 | 规划中 |
+| 文本标注 | 范围未定（[#20](https://github.com/seagochen/annotation-toolkits/issues/20)） |
+
+## 导出格式
+
+每种任务类型的标注数据模型、提交/导出 JSON 形状和示例命令见
+[`docs/`](docs/) 下的对应文档：[`reid`](docs/reid.md)、
+[`classification`](docs/classification.md)、[`caption`](docs/caption.md)、
+[`detection`](docs/detection.md)、[`segmentation`](docs/segmentation.md)、
+[`depth`](docs/depth.md)。检测与分割的 `coco` 导出格式是 COCO 兼容而非完整
+实现（分割的 `segmentation` 字段引用掩膜 PNG 文件，不是 RLE/polygon 编码），
+详见各自文档。
+
+从旧 ReID CLI 迁移的用户请看 [`docs/reid.md`](docs/reid.md) 的路径迁移速查表。
 
 ## 运行要求
 
@@ -93,8 +110,9 @@ ReID 的数据约束、配置、流水线接入和完整操作说明见
 ## 仓库结构
 
 ```text
-backend/   FastAPI 平台、ReID 任务模块、测试、配置和参考流水线
+backend/   FastAPI 平台、各任务类型模块、测试、配置和参考流水线
 frontend/  React/TypeScript 项目导航与任务工作台
+docs/      各任务类型的标注数据模型与导出格式文档
 ```
 
 项目路线与未完成工作以 GitHub Issues 为准。
