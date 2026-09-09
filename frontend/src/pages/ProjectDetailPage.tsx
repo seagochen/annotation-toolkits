@@ -86,6 +86,11 @@ export function ProjectDetailPage() {
           开始目标检测 →
         </Link>
       )}
+      {project.task_type === "segmentation" && project.status === "reviewing" && (
+        <Link className="primary-link" to={`/projects/${project.id}/segment`}>
+          开始图像分割 →
+        </Link>
+      )}
       <section className="detail-grid">
         <article className="detail-card">
           <h2>本地数据</h2>

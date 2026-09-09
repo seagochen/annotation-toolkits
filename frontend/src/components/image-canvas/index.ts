@@ -31,3 +31,25 @@ export {
   updateDrag,
 } from "./box-tool";
 export type { Box, BoxHandle, BoxToolState } from "./box-tool";
+export {
+  beginOrExtendDraft,
+  cancelDraft,
+  clearPolygons,
+  closeDraft,
+  createPolygonToolState,
+  removePolygon,
+  setCategory as setPolygonCategory,
+  undoLastPoint,
+} from "./polygon-tool";
+export type { Polygon, PolygonToolState } from "./polygon-tool";
+export {
+  cloneRasterBuffer,
+  createRasterBuffer,
+  fillPolygon,
+  loadFromImageElement,
+  stampAt,
+  strokeSegment,
+  toBase64,
+  toImageData,
+} from "./raster-buffer";
+export type { Colorize, RasterBuffer } from "./raster-buffer";

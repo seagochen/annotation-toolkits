@@ -496,4 +496,61 @@ describe("project pages", () => {
     });
     getContext.mockRestore();
   });
+
+  it("submits a blank segmentation mask matching the loaded image size", async () => {
+    class InstantImage {
+      onload: (() => void) | null = null;
+      naturalWidth = 2;
+      naturalHeight = 2;
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal("Image", InstantImage);
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(null);
+
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "roads",
+          name: "Roads",
+          task_type: "segmentation",
+          root: "/data/images",
+          status: "reviewing",
+          summary: { categories: ["road", "building"] },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 1,
+          offset: 0,
+          limit: 1,
+          items: [{ item_id: "i1", image_path: "tile.png", mask_path: null }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          item: { item_id: "i1", image_path: "tile.png", mask_path: "i1.png" },
+          status: { state: "reviewed", details: { pending: 0 } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({ total: 0, offset: 0, limit: 1, items: [] }),
+      );
+
+    renderAt("/projects/roads/segment");
+    expect(await screen.findByRole("radio", { name: "road" })).toBeVisible();
+    const submit = await screen.findByRole("button", { name: "保存并继续" });
+    fireEvent.click(submit);
+
+    expect(await screen.findByRole("heading", { name: "图像分割已完成" })).toBeVisible();
+    const request = fetchMock.mock.calls[2][0] as Request;
+    await expect(request.clone().json()).resolves.toEqual({
+      item_id: "i1",
+      result: { image_size: { width: 2, height: 2 }, pixels: "AAAAAA==" },
+    });
+    getContext.mockRestore();
+  });
 });

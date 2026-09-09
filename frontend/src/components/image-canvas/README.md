@@ -40,7 +40,18 @@ type ImageCanvasLayer = {
   （`createBoxToolState`/`beginCreate`/`beginMoveOrResize`/`updateDrag`/
   `endDrag`/`deleteBox`），任务页面只负责渲染与提交。
 - #21 segmentation：polygon 与 raster preview 使用不同 layer，保证顺序明确。
-- #22 depth：灰度 depth raster layer 设置所需 blend mode，brush 仍接收图像坐标。
+  `raster-buffer.ts` 提供一张可原地绘制的 `Uint8ClampedArray`
+  （`stampAt`/`strokeSegment`/`fillPolygon`，像素值即类别索引，0 为背景），
+  `polygon-tool.ts` 只管顶点增删/闭合的纯状态机；多边形闭合后由页面调用
+  `fillPolygon` 落到同一张栅格里，后端只接收整图栅格，不理解多边形。
+- #22 depth：灰度 depth raster layer 设置所需 blend mode，brush 仍接收
+  图像坐标，直接复用 `raster-buffer.ts`（不建立第二套画笔），用
+  `loadFromImageElement` 从已获取的基线深度图水合初始栅格。
+
+`raster-buffer.ts` 的写操作（`stampAt`/`strokeSegment`/`fillPolygon`）
+原地修改 `data`，不像本目录其余模块那样返回全新对象——笔刷一次拖拽每帧
+都要调用多次，逐次深拷贝百万像素数组会明显卡顿。需要触发 React 重渲染
+的调用方应浅拷贝外层包装对象（`{ ...buffer }`），而不是拷贝 `data` 本身。
 
 ## 输入事件
 

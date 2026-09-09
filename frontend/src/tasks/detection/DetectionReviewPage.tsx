@@ -10,6 +10,7 @@ import {
   type QueueResponse,
 } from "../../api/client";
 import { ErrorState, LoadingState } from "../../components/AsyncState";
+import { useImageSize } from "../useImageSize";
 import {
   ImageCanvas,
   type ImageCanvasLayer,
@@ -50,24 +51,6 @@ function configuredCategories(project: ProjectDetail): string[] {
   return Array.isArray(value)
     ? value.filter((category): category is string => typeof category === "string")
     : [];
-}
-
-function useImageSize(src: string | undefined) {
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  useEffect(() => {
-    setSize(null);
-    if (!src) return;
-    let active = true;
-    const image = new Image();
-    image.onload = () => {
-      if (active) setSize({ width: image.naturalWidth, height: image.naturalHeight });
-    };
-    image.src = src;
-    return () => {
-      active = false;
-    };
-  }, [src]);
-  return size;
 }
 
 export function DetectionReviewPage() {
