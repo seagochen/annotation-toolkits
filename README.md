@@ -5,8 +5,8 @@
 Label Studio 的项目、任务队列、标签配置和标注交互作为产品参考，但使用自己的轻量
 实现，不复制或嵌入 Label Studio 源码。
 
-> 本仓库的设计文档以 [`docs/detailed_design/`](docs/detailed_design/00_概述.md) 为
-> 唯一正源（SSoT）。本 README 仅作工程总览与快速上手，详细设计一律链接到 `docs/`。
+> 需求与设计入口见 [`docs/`](docs/README.md)：需求、总体架构与模块契约分别由对应书群维护。
+> 本 README 仅作工程总览与快速上手。
 
 ## 概述
 
@@ -23,7 +23,7 @@ flowchart LR
     Modules -. "reid 委托" .-> ReID["backend/reid_annotation_tool/"]
 ```
 
-详细架构、数据流与模块职责见 [`docs/detailed_design/00_概述.md`](docs/detailed_design/00_概述.md)。
+总体架构与数据流见[总体设计](docs/overall_design/00_概述.md)，模块契约见[详细设计](docs/detailed_design/00_概述.md)。
 
 ### 主要功能
 
@@ -92,7 +92,9 @@ ReID 的数据约束、流水线接入和完整操作说明见 [`backend/README.
 | 文档 | 内容 |
 |---|---|
 | [`docs/`](docs/README.md) | 文档总目录 |
-| [`docs/detailed_design/`](docs/detailed_design/00_概述.md) | 详细设计书（SSoT） |
+| [`docs/requirements/`](docs/requirements/00_概述.md) | 需求分析书：目标、范围、需求与验收 |
+| [`docs/overall_design/`](docs/overall_design/00_概述.md) | 总体设计书：架构、职责、数据与部署边界 |
+| [`docs/detailed_design/`](docs/detailed_design/00_概述.md) | 详细设计书：模块契约与实现 |
 | [`docs/detailed_design/70_外部接口.md`](docs/detailed_design/70_外部接口.md) | HTTP API 与各任务类型的提交/导出格式 |
 | [`docs/detailed_design/80_配置参考.md`](docs/detailed_design/80_配置参考.md) | 配置项与环境变量参考 |
 | [`docs/detailed_design/90_部署与运维.md`](docs/detailed_design/90_部署与运维.md) | 安装、启动、打包、运维 |
@@ -115,13 +117,14 @@ frontend/
     ├── pages/                     # 项目列表/详情、画布 demo
     └── tasks/<type>/              # 各任务类型的标注页面
 
-docs/detailed_design/      # 详细设计书（SSoT）
+docs/requirements/        # 需求与验收标准
+docs/overall_design/      # 总体架构与跨系统约束
+docs/detailed_design/     # 模块契约与实现设计
 ```
 
 ## 相关说明
 
 本平台是本地单用户、局域网场景，没有身份认证、没有多用户权限——这是产品定位的
 一部分，见 [`docs/detailed_design/10_通用设计.md`](docs/detailed_design/10_通用设计.md) §3。
-项目路线与未完成工作以 GitHub Issues 为准；设计细节以
-[`docs/detailed_design/`](docs/detailed_design/00_概述.md) 为准，具体数值以对应
-源码/配置文件为一次信息源。
+项目路线与未完成工作以 GitHub Issues 为准；需求与设计按 [docs 文档导航](docs/README.md)
+在各自书群维护，具体数值以对应源码/配置文件为一次信息源。

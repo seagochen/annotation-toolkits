@@ -74,9 +74,10 @@ sequenceDiagram
     participant Stage as app.py 阶段函数
 
     API->>Runner: start(name, project, args)
-    Runner->>Runner: 校验 name/options，创建 Job(state=queued)
-    Runner->>Gate: 派生线程，acquire()
-    Gate-->>Runner: 同一时刻只放行一个
+    Runner->>Runner: 校验 name/options
+    Runner->>Gate: 尝试非阻塞获取执行门
+    Gate-->>Runner: 获取成功；忙碌则拒绝启动
+    Runner->>Runner: 创建并持久化 Job，派生线程
     Runner->>Stage: DISPATCH[name](project, args)，stdout 重定向进日志
     Stage-->>Runner: 成功 / 抛出异常
     Runner->>Runner: 状态置 done/failed，atomic_write_json 持久化
