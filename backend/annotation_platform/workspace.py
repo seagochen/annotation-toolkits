@@ -31,9 +31,9 @@ from typing import AsyncIterator, Iterable, Mapping
 
 import yaml
 
+from local_files import atomic_write_bytes, file_lock
 from reid_annotation_tool.config import ConfigError as ReIDConfigError
 
-from .local_files import atomic_write_bytes, file_lock
 from .project_forms import (
     MODEL_PATH_KEYS,
     ManagementError,

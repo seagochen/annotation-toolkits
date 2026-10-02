@@ -24,8 +24,9 @@ from pathlib import Path
 
 import yaml
 
+from local_files import atomic_write_bytes, atomic_write_json, file_lock
+
 from .imaging import encode_gray8_png
-from .local_files import atomic_write_bytes, atomic_write_json, file_lock
 from .task_types import (
     ExportRequest,
     ExportResult,

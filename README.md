@@ -125,6 +125,7 @@ python3 docker/build_and_run.py --data <dir> [--mount /abs/dataset/path ...]
 backend/
 ├── annotation_platform/   # 任务类型协议 + 六个内置模块 + FastAPI 应用
 ├── reid_annotation_tool/  # ReID CLI 与流水线
+├── local_files/           # 两个包共用的原子写入原语与路径锁
 ├── pipeline/              # 参考推理流水线
 ├── configs/               # 各任务类型 / 项目注册表的示例配置
 └── tests/                 # pytest 测试

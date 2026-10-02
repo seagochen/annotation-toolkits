@@ -66,7 +66,7 @@ def revise(candidates: Path, base_pairs: Path, left: str, right: str,
     archive_rows(round_dir / "pairs.overturned.csv",
                  [{key_: value for key_, value in row.items() if key_ != "line"}
                   for row in removed], fields)
-    atomic_write_csv(base_pairs, kept, fields)
+    atomic_write_csv(base_pairs, fields, kept)
     event["pairs_sha256_after"] = sha256(base_pairs)
     event.update(file_verdict(candidates, key, verdict, notes, injected_defaults))
 
@@ -100,7 +100,7 @@ def file_verdict(candidates: Path, key: tuple[str, str], verdict: str, notes: st
             row["review_label"] = verdict
             if notes:
                 row["review_notes"] = notes
-        atomic_write_csv(candidates, rows, fields)
+        atomic_write_csv(candidates, fields, rows)
         return {"candidate_id": matched[0]["candidate_id"], "injected": False,
                 "candidate_ids": [row["candidate_id"] for row in matched]}
 
@@ -117,11 +117,11 @@ def file_verdict(candidates: Path, key: tuple[str, str], verdict: str, notes: st
         "review_label": verdict, "review_notes": notes or "web base revision",
         **injected_defaults,
     })
-    atomic_write_csv(candidates, rows + [injected], fields)
+    atomic_write_csv(candidates, fields, rows + [injected])
     source_file = candidates.parent / "candidate_source.csv"
     sources = read_csv(source_file) if source_file.is_file() else []
     sources.append({"candidate_id": injected["candidate_id"], "source": WEB_SOURCE,
                     "selection_basis": notes or "revised from the conflict detail page"})
-    atomic_write_csv(source_file, sources, ("candidate_id", "source", "selection_basis"))
+    atomic_write_csv(source_file, ("candidate_id", "source", "selection_basis"), sources)
     return {"candidate_id": injected["candidate_id"], "injected": True,
             "candidate_ids": [injected["candidate_id"]]}

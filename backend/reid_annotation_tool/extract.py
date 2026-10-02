@@ -590,10 +590,10 @@ def extract(args) -> dict:
         "first_timestamp": f"{witness['timestamp']:.3f}",
     } for (left, right), witness in sorted(covisible.items())]
 
-    atomic_write_csv(args.out / "identities.csv", identities, IDENTITY_FIELDS)
-    atomic_write_csv(args.out / "pairs.csv", pairs, PAIR_FIELDS)
-    atomic_write_csv(args.out / "tracks.csv", tracks, TRACK_FIELDS)
-    atomic_write_csv(args.out / "covisibility.csv", covisible_rows, COVISIBLE_FIELDS)
+    atomic_write_csv(args.out / "identities.csv", IDENTITY_FIELDS, identities)
+    atomic_write_csv(args.out / "pairs.csv", PAIR_FIELDS, pairs)
+    atomic_write_csv(args.out / "tracks.csv", TRACK_FIELDS, tracks)
+    atomic_write_csv(args.out / "covisibility.csv", COVISIBLE_FIELDS, covisible_rows)
 
     counts = {split: {
         "identities": sum(row["split"] == split and row["status"] == "accepted" for row in tracks),

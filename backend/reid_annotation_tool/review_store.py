@@ -11,6 +11,8 @@ import threading
 from collections import Counter
 from pathlib import Path
 
+from local_files import file_lock
+
 from . import conflicts as conflict_engine
 from . import revision
 from .core import REVIEW_LABELS, atomic_write_csv, read_csv, relation
@@ -18,19 +20,10 @@ from .domain import csv_fields
 from .provenance import Provenance
 
 GALLERY_LIMIT = 8
-_STORE_LOCKS: dict[Path, threading.RLock] = {}
-_STORE_LOCKS_GUARD = threading.Lock()
 
 
 class LabelConflictError(RuntimeError):
     """A write-once review request disagrees with an existing decision."""
-
-
-def _store_lock(path: Path) -> threading.RLock:
-    """Share the CSV lock across Store instances created for HTTP requests."""
-    key = path.resolve()
-    with _STORE_LOCKS_GUARD:
-        return _STORE_LOCKS.setdefault(key, threading.RLock())
 
 
 def spread(values: list, maximum: int) -> list:
@@ -49,7 +42,9 @@ class Store:
         self.root, self.candidates = root, candidates
         self.base_pairs = base_pairs
         self.reviews = reviews or ([candidates] if candidates else [])
-        self.lock = _store_lock(candidates or root)
+        # The same per-path lock the platform modules use, shared across
+        # Store instances created for HTTP requests.
+        self.lock = file_lock(candidates or root)
         self._rows: list[dict] = []
         self._stamp = -1.0
         self._gallery: dict[str, list[str]] = {}
@@ -156,7 +151,7 @@ class Store:
                     break
             if target is None:
                 return None
-            atomic_write_csv(self.candidates, rows, fields)
+            atomic_write_csv(self.candidates, fields, rows)
             self._stamp = -1.0
             self.invalidate_conflicts()
             return self.decorate(target)

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import json
-import os
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
+
+# Re-exported: ReID modules and site pipelines (backend/pipeline/) import the
+# atomic writers from here; the one implementation lives in `local_files`.
+from local_files import atomic_write_csv, atomic_write_json, atomic_write_text  # noqa: F401
 
 
 PAIR_FIELDS = ("img1", "img2", "label", "split", "evidence",
@@ -20,29 +22,6 @@ REVIEW_KINDS = {"cross_track", "track_purity", ""}
 def read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
-
-
-def atomic_write_csv(path: Path, rows: list[dict], fields) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    with temporary.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
-        handle.flush()
-        os.fsync(handle.fileno())
-    temporary.replace(path)
-
-
-def atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(text, encoding="utf-8")
-    temporary.replace(path)
-
-
-def atomic_write_json(path: Path, value: object) -> None:
-    atomic_write_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
 def sha256(path: Path) -> str:
@@ -356,7 +335,7 @@ def finalize_reviews(root: Path, base_pairs: Path, reviews: list[Path],
     for split in protected:
         if canonical_split(output_rows, split) != canonical_split(base_rows, split):
             raise AssertionError(f"Protected split changed: {split}")
-    atomic_write_csv(output, output_rows, PAIR_FIELDS)
+    atomic_write_csv(output, PAIR_FIELDS, output_rows)
     report = {
         "schema": 1, "base_pairs": str(base_pairs),
         "base_pairs_sha256": sha256(base_pairs), "output": str(output),

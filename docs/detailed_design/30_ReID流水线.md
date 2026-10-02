@@ -13,7 +13,7 @@
 | [`tracker.py`](../../backend/reid_annotation_tool/tracker.py) | 确定性 IoU 跟踪器（供参考流水线使用） |
 | [`detector.py`](../../backend/reid_annotation_tool/detector.py) / [`embed.py`](../../backend/reid_annotation_tool/embed.py) | 参考流水线的检测器封装 / ONNX ReID embedding |
 | [`mine.py`](../../backend/reid_annotation_tool/mine.py) | 用粗糙模型给人工审核候选排序 |
-| [`core.py`](../../backend/reid_annotation_tool/core.py) | 清单、审核标签、身份约束的基础读写原语 |
+| [`core.py`](../../backend/reid_annotation_tool/core.py) | 清单、审核标签、身份约束的基础读写原语；再导出共享的原子写入原语（实现见 [`local_files`](../../backend/local_files/__init__.py)） |
 | [`review_store.py`](../../backend/reid_annotation_tool/review_store.py) | 审核队列访问 + 原子 CSV 标签持久化（平台 API 与 CLI 共用） |
 | [`conflicts.py`](../../backend/reid_annotation_tool/conflicts.py) | 身份关系图上的逻辑冲突检测 |
 | [`domain.py`](../../backend/reid_annotation_tool/domain.py) | 跨天/跨相机关系归档（同日同机位约束） |

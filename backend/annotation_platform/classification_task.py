@@ -10,7 +10,8 @@ from pathlib import Path
 
 import yaml
 
-from .local_files import atomic_write_csv, atomic_write_json, file_lock
+from local_files import atomic_write_csv, atomic_write_json, file_lock
+
 from .task_types import (
     ExportRequest,
     ExportResult,
