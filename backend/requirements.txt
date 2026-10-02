@@ -3,13 +3,16 @@
 #
 # This file is the one-command install for a fresh machine. For an editable
 # or partial install use the pyproject extras instead:
-#   pip install -e '.[extract,ultralytics]'   # the same set as below
+#   pip install -e .                          # core only (the block below)
+#   pip install -e '.[extract,ultralytics]'   # the same set as this file
 #   pip install -e '.[test]'                  # + pytest, for development
 #
-# Only PyYAML is needed to review, audit and finalize an existing dataset --
-# the web app, the conflict engine and the pair manifest are pure standard
-# library on purpose, so a reviewer's machine needs nothing heavy.
+# --- core -------------------------------------------------------------------
+# The FastAPI platform and the ReID review/audit/finalize path. Must match
+# `dependencies` in pyproject.toml -- that list is the source of truth.
+FastAPI>=0.115,<1
 PyYAML>=6
+uvicorn>=0.30,<1
 
 # --- extract / mine ---------------------------------------------------------
 # Reading video and cutting crops, and the rough ReID model that ranks review

@@ -65,8 +65,8 @@ conda create -n reid-annotation python=3.11 -y
 conda activate reid-annotation
 
 pip install -r requirements.txt        # 完整安装：extract + mine + ultralytics 参考流水线
-# 纯标注 / 审计机器只需要：
-#   pip install PyYAML
+# 只做标注 / 审计、不抽取视频的机器只需要核心依赖（FastAPI、PyYAML、uvicorn）：
+#   pip install -e .
 # 开发机 / 需要可编辑安装时：
 #   pip install -e '.[extract,ultralytics]'
 ```
