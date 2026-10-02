@@ -61,6 +61,10 @@ class TaskProject:
     value: object
 
 
+# Largest page any queue returns; the HTTP route and QueueRequest both use it.
+MAX_QUEUE_LIMIT = 200
+
+
 @dataclass(frozen=True)
 class QueueRequest:
     offset: int = 0
@@ -70,8 +74,8 @@ class QueueRequest:
     def __post_init__(self) -> None:
         if self.offset < 0:
             raise ValueError("queue offset must be non-negative")
-        if self.limit <= 0:
-            raise ValueError("queue limit must be positive")
+        if not 0 < self.limit <= MAX_QUEUE_LIMIT:
+            raise ValueError(f"queue limit must be between 1 and {MAX_QUEUE_LIMIT}")
 
 
 @dataclass(frozen=True)

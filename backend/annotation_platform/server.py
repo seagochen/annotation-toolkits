@@ -21,6 +21,7 @@ from .project_registry import (
     RegisteredProject,
 )
 from .task_types import (
+    MAX_QUEUE_LIMIT,
     ActionRecord,
     ActionRequest,
     QueueRequest,
@@ -301,16 +302,21 @@ def create_app(
     async def get_queue(
         project_id: str,
         registry: Registry,
+        request: Request,
         offset: Annotated[int, Query(ge=0)] = 0,
-        limit: Annotated[int, Query(ge=1, le=200)] = 60,
-        kind: str = "",
-        split: str = "",
+        limit: Annotated[int, Query(ge=1, le=MAX_QUEUE_LIMIT)] = 60,
         status: str = "",
         q: str = "",
     ) -> dict:
+        """Queue page. ``status`` and ``q`` are the filters every task type
+        accepts; any other query parameter (ReID's ``kind``/``split``) is passed
+        through as a filter for the task module to accept or reject."""
         entry = _project_entry(registry, project_id)
-        raw_filters = {"kind": kind, "split": split, "status": status, "q": q}
-        filters = {key: value for key, value in raw_filters.items() if value}
+        filters = {
+            key: value
+            for key, value in request.query_params.items()
+            if key not in {"offset", "limit"} and value
+        }
         try:
             page = entry.module.queue(
                 entry.project,
@@ -649,14 +655,7 @@ def _add_management_routes(application: FastAPI) -> None:
 
 def _project_detail(entry: RegisteredProject) -> dict:
     task_status = entry.module.status(entry.project)
-    return {
-        "id": entry.id,
-        "name": entry.name,
-        "task_type": entry.task_type,
-        "root": str(entry.project.root),
-        "status": task_status.state,
-        "summary": task_status.details,
-    }
+    return {**entry.describe(task_status), "summary": task_status.details}
 
 
 def _raise_management_error(error: ManagementError) -> NoReturn:

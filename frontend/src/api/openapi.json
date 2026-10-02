@@ -196,6 +196,7 @@
     "/api/projects/{project_id}/queue": {
       "get": {
         "summary": "Get Queue",
+        "description": "Queue page. ``status`` and ``q`` are the filters every task type\naccepts; any other query parameter (ReID's ``kind``/``split``) is passed\nthrough as a filter for the task module to accept or reject.",
         "operationId": "get_queue_api_projects__project_id__queue_get",
         "parameters": [
           {
@@ -228,26 +229,6 @@
               "minimum": 1,
               "default": 60,
               "title": "Limit"
-            }
-          },
-          {
-            "name": "kind",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Kind"
-            }
-          },
-          {
-            "name": "split",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Split"
             }
           },
           {

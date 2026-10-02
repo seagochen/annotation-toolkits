@@ -47,7 +47,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Queue */
+        /**
+         * Get Queue
+         * @description Queue page. ``status`` and ``q`` are the filters every task type
+         *     accepts; any other query parameter (ReID's ``kind``/``split``) is passed
+         *     through as a filter for the task module to accept or reject.
+         */
         get: operations["get_queue_api_projects__project_id__queue_get"];
         put?: never;
         post?: never;
@@ -718,8 +723,6 @@ export interface operations {
             query?: {
                 offset?: number;
                 limit?: number;
-                kind?: string;
-                split?: string;
                 status?: string;
                 q?: string;
             };

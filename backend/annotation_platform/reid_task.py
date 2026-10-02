@@ -88,7 +88,7 @@ class ReIDTaskType:
             status=request.filters.get("status", ""),
             search=request.filters.get("q", ""),
             offset=request.offset,
-            limit=min(request.limit, 200),
+            limit=request.limit,
         )
         return QueuePage(
             total=selected["total"],

@@ -8,6 +8,7 @@ import pytest
 
 from annotation_platform.server import create_app
 from annotation_platform.task_types import (
+    MAX_QUEUE_LIMIT,
     ExportRequest,
     ExportResult,
     QueuePage,
@@ -333,6 +334,40 @@ def test_review_queue_submit_refresh_and_duplicate_safety(tmp_path):
 
     refreshed = request(app, "GET", "/api/projects/lobby/queue?status=pending")
     assert refreshed.json()["total"] == 0
+
+
+def test_queue_passes_task_specific_filters_through_to_the_module(tmp_path):
+    registry, _ = make_review_registry(tmp_path)
+    reid = create_app(registry)
+    # `kind`/`split` are ReID's own filters; the platform only forwards them.
+    assert request(reid, "GET", "/api/projects/lobby/queue?kind=cross_track"
+                   "&split=train").json()["total"] == 1
+    assert request(reid, "GET", "/api/projects/lobby/queue?kind=track_purity"
+                   ).json()["total"] == 0
+
+    classification = create_app(make_classification_registry(tmp_path))
+    rejected = request(classification, "GET", "/api/projects/scenes/queue?kind=x")
+    assert rejected.status_code == 422
+    assert "unsupported classification filters: ['kind']" in rejected.json()[
+        "detail"]["message"]
+
+
+def test_queue_limit_has_one_upper_bound(tmp_path):
+    app = create_app(make_classification_registry(tmp_path))
+    assert request(app, "GET", f"/api/projects/scenes/queue?limit={MAX_QUEUE_LIMIT}"
+                   ).status_code == 200
+    assert request(app, "GET", f"/api/projects/scenes/queue?limit={MAX_QUEUE_LIMIT + 1}"
+                   ).status_code == 422
+    with pytest.raises(ValueError, match="between 1 and"):
+        QueueRequest(limit=MAX_QUEUE_LIMIT + 1)
+
+
+def test_project_detail_is_the_list_item_plus_summary(tmp_path):
+    app = create_app(make_classification_registry(tmp_path))
+    [item] = request(app, "GET", "/api/projects").json()
+    detail = request(app, "GET", "/api/projects/scenes").json()
+    assert {key: detail[key] for key in item} == item
+    assert set(detail) == set(item) | {"summary"}
 
 
 def test_review_rejects_bad_submission_without_changing_csv(tmp_path):

@@ -17,6 +17,7 @@ import yaml
 from .task_types import (
     TaskOperationError,
     TaskProject,
+    TaskStatus,
     TaskTypeModule,
     TaskTypeRegistry,
     UnknownTaskTypeError,
@@ -42,13 +43,16 @@ class RegisteredProject:
     def task_type(self) -> str:
         return self.module.type_name
 
-    def describe(self) -> dict:
+    def describe(self, status: TaskStatus | None = None) -> dict:
+        """The ``ProjectListItem`` fields; pass ``status`` to avoid computing it twice."""
+        if status is None:
+            status = self.module.status(self.project)
         return {
             "id": self.id,
             "name": self.name,
             "task_type": self.task_type,
             "root": str(self.project.root),
-            "status": self.module.status(self.project).state,
+            "status": status.state,
         }
 
 
