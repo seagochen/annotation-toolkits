@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Build the Annotation Toolkits image and (re)start its container.
 
-    python3 docker/build_and_run.py --data ~/annotation-projects
-    python3 docker/build_and_run.py --data ./projects --mount /home/me/dataset
-    python3 docker/build_and_run.py --data ./projects --no-build   # restart only
+    python3 docker/build_and_run.py --data ~/annotation-workspace
+    python3 docker/build_and_run.py --data ./workspace --mount /home/me/dataset
+    python3 docker/build_and_run.py --data ./workspace --no-build   # restart only
 
---data is mounted at /data and must contain projects.yaml. Paths inside the
-project configs resolve relative to their own file, so a self-contained data
-directory needs nothing else. Configs that point at absolute host paths (e.g.
-`dataset: /home/me/dataset/scene`) need each such directory passed with
---mount, which mounts it at the same path inside the container so the config
-keeps working unchanged on both sides.
+--data is the workspace, mounted at /data (ANNOTATION_WORKSPACE): the web UI
+creates projects.yaml and one projects/<id>/ directory per project there, and
+an empty or missing directory is fine -- it is created and starts with no
+projects. Uploaded and zip-imported images live inside it.
+
+--mount DIR mounts a host directory at the same path inside the container and
+adds it to ANNOTATION_IMPORT_ROOTS, so a project can link an existing dataset
+under it ("link a server directory" in the UI) and absolute paths keep
+meaning the same thing on both sides. Without --mount only directories inside
+the workspace can be linked.
 
 The UI and API are served together on http://<host>:3000.
 """
@@ -44,7 +48,7 @@ def wait_for_http(url: str, attempts: int = 30) -> str | None:
                 json.load(response)
                 return None
         except urllib.error.HTTPError as exc:
-            # The server is up; a 500 here means projects.yaml is invalid,
+            # The server is up; a 500 here means /data/projects.yaml is invalid,
             # which the body explains better than a timeout would.
             return f"HTTP {exc.code}: {exc.read().decode(errors='replace')}"
         except (urllib.error.URLError, OSError, ValueError) as exc:
@@ -57,11 +61,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--data", required=True, type=Path,
-                        help="host directory with projects.yaml, mounted at /data")
+                        help="workspace directory (created if missing), mounted at /data")
     parser.add_argument("--mount", action="append", default=[], type=Path,
                         metavar="DIR",
                         help="extra host directory mounted at the same path "
-                             "(repeatable); for configs that use absolute paths")
+                             "(repeatable); projects may link datasets under it")
     parser.add_argument("--bind", default="0.0.0.0",
                         help="host address to publish port 3000 on (default: "
                              "all interfaces; 127.0.0.1 keeps it local-only)")
@@ -72,9 +76,11 @@ def main():
     args = parser.parse_args()
 
     data = args.data.expanduser().resolve()
-    if not (data / "projects.yaml").is_file():
-        sys.exit(f"missing {data / 'projects.yaml'} -- see "
-                 "backend/configs/projects.example.yaml for the format")
+    if data.exists() and not data.is_dir():
+        sys.exit(f"--data {data}: not a directory")
+    # Created here, by the invoking user, so the bind mount is owned by the
+    # same uid the container runs as rather than by root via the daemon.
+    data.mkdir(parents=True, exist_ok=True)
     mounts = [path.expanduser().resolve() for path in args.mount]
     for path in mounts:
         if not path.is_dir():
@@ -98,6 +104,9 @@ def main():
         "--restart", "unless-stopped",
         "-p", f"{args.bind}:{PORT}:{PORT}",
         "-v", f"{data}:/data",
+        # Linkable dataset directories: the workspace plus every --mount.
+        "-e", "ANNOTATION_IMPORT_ROOTS=" + os.pathsep.join(
+            ["/data", *(str(path) for path in mounts)]),
     ]
     if not args.no_gpu:
         cmd += [

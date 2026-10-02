@@ -641,8 +641,10 @@ python app.py evaluate
 
 ## 配置文件
 
-平台可通过 `projects.yaml` 列出多个本地项目；注册表只保存平台元数据和项目配置路径，
-数据集根目录及任务参数仍由各自的 `reid.yaml` 管理：
+平台通过 `projects.yaml` 列出多个本地项目；注册表只保存平台元数据和项目配置路径，
+数据集根目录及任务参数仍由各自的 `reid.yaml` 管理。平台上的项目**只通过 Web 界面
+管理**：注册表和每个项目的配置都由服务端写在工作区（`ANNOTATION_WORKSPACE`）里，
+不需要手写；下面的格式供理解和服务端排障使用。格式如下：
 
 ```yaml
 projects:
@@ -652,11 +654,12 @@ projects:
     config: ./scene/reid.yaml
 ```
 
-注册表路径按 `projects.yaml` 所在目录解析。也可以传入一个目录，将其中每个
-`*.yaml`/`*.yml` 视为单独的项目条目。Python 层使用
-`ProjectRegistry.load(path).list_projects()` 和 `load_project(id)`；统一 HTTP 接口使用
-`GET /api/projects` 和 `GET /api/projects/{id}`。完整示例见
-`configs/projects.example.yaml`。
+注册表路径按 `projects.yaml` 所在目录解析。Python 层的 `ProjectRegistry.load()` 也可以
+传入一个目录，将其中每个 `*.yaml`/`*.yml` 视为单独的项目条目（HTTP 服务不使用这种
+形式：它把目录当作工作区，读写其中的 `projects.yaml`）。Python 层使用
+`ProjectRegistry.load(path).list_projects()` 和 `load_project(id)`；HTTP 接口的项目
+列表、创建、属性修改、导入、导出与删除见
+`docs/detailed_design/70_外部接口.md`。完整示例见 `configs/projects.example.yaml`。
 
 ### 任务类型插件
 

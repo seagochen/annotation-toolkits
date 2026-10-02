@@ -4,13 +4,16 @@
 
 | 目录/文件 | 职责 |
 |---|---|
-| [`App.tsx`](../../frontend/src/App.tsx) | `wouter` 路由表：项目列表/详情 + 各任务标注页面的固定路径 |
+| [`App.tsx`](../../frontend/src/App.tsx) | 左侧导航 + 右侧工作区的外壳，`wouter` 路由表（§2） |
 | [`api/client.ts`](../../frontend/src/api/client.ts) | 基于生成的 OpenAPI 类型（`api/schema.d.ts`）的类型安全 API 客户端 |
 | [`components/image-canvas/`](../../frontend/src/components/image-canvas/) | 与具体任务无关的共享画布图元（§5） |
 | [`components/workspace/`](../../frontend/src/components/workspace/) | 全部任务页共用的工作台布局、页面级快捷键（`useHotkeys`）与类别配色（§6） |
+| [`components/shell/`](../../frontend/src/components/shell/) | 侧边导航（`SideNav`）、新建项目的任务类型弹窗、全局项目列表上下文（`ProjectsContext`）、线条图标 |
+| [`components/settings/`](../../frontend/src/components/settings/) | 按后端字段描述（`/api/task-types` 的 `fields`）渲染的通用属性表单 |
 | [`components/AsyncState.tsx`](../../frontend/src/components/AsyncState.tsx) | 通用加载中/错误态展示组件 |
 | [`project-meta.ts`](../../frontend/src/project-meta.ts) | 状态/任务类型的中文名、任务入口路径、由 `summary` 计算进度 |
-| [`pages/`](../../frontend/src/pages/) | 项目列表、项目详情（按 `task_type` 分支渲染各任务的入口链接）、画布 demo |
+| [`pages/`](../../frontend/src/pages/) | 首页（新建项目入口）、新建项目属性页、画布 demo |
+| [`pages/project/`](../../frontend/src/pages/project/) | 项目 dashboard：概览、导入数据、属性、导出 |
 | [`tasks/<type>/`](../../frontend/src/tasks/) | 每种任务类型一个目录，一个 `*ReviewPage.tsx` |
 | [`tasks/useImageSize.ts`](../../frontend/src/tasks/useImageSize.ts) | 检测/分割/深度共用：提交前用一张隐藏 `Image` 预探测图片像素尺寸 |
 
@@ -26,18 +29,36 @@
 校验重复实现——`result` 的合法性以后端 422/409 响应为准，前端校验只是提前拦截
 明显无效的输入以改善体验。
 
-## 2. 路由与项目详情分发
+## 2. 页面结构与路由
 
-`App.tsx` 按固定路径把每种 `task_type` 映射到一个页面组件（`/projects/:id/classify`、
-`/caption`、`/detect`、`/segment`、`/depth`、`/review`）；`ProjectDetailPage.tsx`
-按 `project-meta.ts` 的 `taskEntries` 表渲染对应的入口链接。新增任务类型需要同时改
-`App.tsx` 与 `taskEntries` 两处——没有从 `task_type` 到路由的自动派生（见 #33）。
-`/projects/:id/<task>` 形式的路径由 `App.tsx` 切换为全宽布局（`main.main-wide`）。
+页面左右分割：左侧窄导航（可收起为图标栏，窄屏下固定为图标栏）放"新建项目"按钮和
+项目列表，当前项目下展开"概览 / 导入数据 / 标注 / 属性 / 导出"；右侧为工作区。
+项目只能在界面中创建和管理（后端工作区模型见 [`80_配置参考.md`](80_配置参考.md)）。
+
+| 路径 | 页面 |
+|---|---|
+| `/` | 首页：只有"新建项目"入口，项目从导航进入 |
+| （弹窗） | 选择标注任务类型，确认后进入 `/new/<type>` |
+| `/new/:taskType` | 新建项目属性页：名称 + 该任务类型的字段，创建后进入概览 |
+| `/projects/:id` | 概览（dashboard）：进度、下一步操作卡片、任务摘要；ReID 另有流水线动作 |
+| `/projects/:id/import` | 导入数据：上传图片/文件夹/ZIP（托管目录），或关联服务器目录 |
+| `/projects/:id/settings` | 属性：字段表单、直接编辑配置文件、删除项目 |
+| `/projects/:id/export` | 导出：按任务类型可用的格式下载 |
+| `/projects/:id/classify` 等 | 标注页面（`/classify`、`/caption`、`/detect`、`/segment`、`/depth`、`/review`），全宽布局 |
+
+属性表单不在前端硬编码字段：`SettingsForm` 按 `/api/task-types` 返回的 `fields`
+渲染，字段的 `lock`（已有标注后 `append_only`/`locked`）与 `server_only`（只读）
+在前端只用于提示和禁用，最终由后端校验。
+
+`App.tsx` 按固定路径把每种 `task_type` 映射到一个标注页面组件，导航与概览页按
+`project-meta.ts` 的 `taskEntries` 表生成入口链接。新增任务类型需要同时改 `App.tsx`
+与 `taskEntries` 两处——没有从 `task_type` 到路由的自动派生（见 #33）。
 
 ## 3. 接口一览
 
 前端只消费 [`70_外部接口.md`](70_外部接口.md) 描述的通用端点
-（`queue`/`annotations`/`files`/`actions`），不存在任务类型专属的 HTTP 端点；
+（`queue`/`annotations`/`files`/`actions`，以及项目管理的 `task-types`/`settings`/
+`config`/`import`/`export`），不存在任务类型专属的 HTTP 端点；
 `api/client.ts` 的函数签名对全部任务类型通用，`result`/`summary` 字段类型是
 `Record<string, unknown>`。
 
@@ -88,8 +109,8 @@ flowchart LR
 
 | 区域 | 内容 |
 |---|---|
-| 顶栏 | 返回项目、任务名、当前文件名、进度条（`已完成 / 总数`）、剩余数（`.queue-count`） |
-| 舞台 | 画布或图片，高度为视口减去站点顶栏，页面本身不滚动 |
+| 顶栏（工作区内） | 返回项目、任务名、当前文件名、进度条（`已完成 / 总数`）、剩余数（`.queue-count`） |
+| 舞台 | 画布或图片，占满工作区剩余高度，页面本身不滚动 |
 | 侧栏 | 类别/工具等面板（`PanelSection`、`OptionList`、`Segmented`、`RangeField`），可折叠的快捷键列表；底部固定 `SubmitBar`（保存按钮、禁用原因、保存失败与重试） |
 
 进度由 `project-meta.ts` 的 `summaryProgress()` 计算：图像任务取 `summary.total`，

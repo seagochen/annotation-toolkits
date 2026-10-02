@@ -1,9 +1,22 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 
+// Page requests, answered in order by each test. The side navigation's
+// project-list request is answered separately (see `projectList`) so that
+// it does not shift the order every test relies on.
 const fetchMock = vi.fn();
+let projectList: () => Response;
+
+function routedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const request = input instanceof Request ? input : new Request(input, init);
+  const url = new URL(request.url);
+  if (request.method === "GET" && url.pathname === "/api/projects") {
+    return Promise.resolve(projectList());
+  }
+  return fetchMock(request);
+}
 
 function response(value: object, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -18,18 +31,83 @@ function renderAt(path = "/") {
   return render(<App />);
 }
 
+
+const classificationType = {
+  type: "classification",
+  label: "图像分类",
+  description: "为每张图像选择标签。",
+  import_modes: ["upload", "directory"],
+  export_formats: [{ format: "native", label: "原生 JSON" }],
+  fields: [
+    {
+      key: "labels",
+      label: "标签",
+      type: "list",
+      required: true,
+      default: null,
+      options: null,
+      help: null,
+      lock: "append_only",
+      server_only: false,
+      group: null,
+    },
+    {
+      key: "mode",
+      label: "选择方式",
+      type: "select",
+      required: true,
+      default: "single",
+      options: [
+        { value: "single", label: "单选" },
+        { value: "multi", label: "多选" },
+      ],
+      help: null,
+      lock: "locked",
+      server_only: false,
+      group: null,
+    },
+  ],
+};
+
+const streetProject = {
+  id: "street",
+  name: "Street",
+  task_type: "classification",
+  root: "/workspace/projects/street/data",
+  status: "reviewing",
+  summary: { labels: ["indoor", "outdoor"], mode: "single", total: 2, labelled: 1, pending: 1 },
+};
+
+function streetSettings(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "street",
+    name: "Street",
+    task_type: "classification",
+    values: { labels: ["indoor", "outdoor"], mode: "single" },
+    fields: classificationType.fields,
+    config_path: "/workspace/projects/street/config.yaml",
+    config_text: "dataset: ./data\nlabels: [indoor, outdoor]\nmode: single\n",
+    data_source: { mode: "managed", path: "/workspace/projects/street/data" },
+    import_roots: ["/workspace"],
+    annotated: true,
+    ...overrides,
+  };
+}
+
 describe("project pages", () => {
   beforeEach(() => {
     fetchMock.mockReset();
-    vi.stubGlobal("fetch", fetchMock);
+    projectList = () => response([]);
+    vi.stubGlobal("fetch", routedFetch);
+    window.localStorage.clear();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("shows loading and then the live project list", async () => {
-    fetchMock.mockResolvedValueOnce(
+  it("lists projects in the side navigation and offers a new project on the home page", async () => {
+    projectList = () =>
       response([
         {
           id: "lobby",
@@ -38,31 +116,28 @@ describe("project pages", () => {
           root: "/data/lobby",
           status: "reviewing",
         },
-      ]),
-    );
+      ]);
     renderAt();
 
-    expect(screen.getByRole("status")).toHaveTextContent("正在读取项目");
-    const project = await screen.findByRole("link", { name: /Lobby/ });
+    const navigation = screen.getByRole("navigation", { name: "项目" });
+    const project = await within(navigation).findByRole("link", { name: /Lobby/ });
     expect(project).toHaveAttribute("href", "/projects/lobby");
-    expect(project).toHaveTextContent("标注中");
+    expect(screen.getByRole("heading", { name: "选择或新建一个项目" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: /新建项目/ })).toHaveLength(2);
   });
 
-  it("shows an empty registry state", async () => {
-    fetchMock.mockResolvedValueOnce(response([]));
+  it("shows an empty workspace", async () => {
     renderAt();
-    expect(await screen.findByText("在 projects.yaml 中注册第一个项目")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "创建第一个标注项目" })).toBeVisible();
+    expect(await screen.findByText("还没有项目")).toBeVisible();
   });
 
   it("shows backend errors without replacing them with an empty list", async () => {
-    fetchMock.mockResolvedValueOnce(
-      response(
-        { detail: { code: "registry_invalid", message: "registry not found" } },
-        500,
-      ),
-    );
+    projectList = () =>
+      response({ detail: { code: "registry_invalid", message: "registry not found" } }, 500);
     renderAt();
-    expect(await screen.findByRole("alert")).toHaveTextContent("registry not found");
+    expect(await screen.findByText("registry not found")).toBeVisible();
+    expect(screen.queryByText("还没有项目")).toBeNull();
   });
 
   it("loads a project detail through its route", async () => {
@@ -486,7 +561,9 @@ describe("project pages", () => {
     renderAt("/projects/yard/detect");
     expect(await screen.findByRole("radio", { name: "cat" })).toBeVisible();
     expect(screen.getByRole("application", { name: "yard.jpg" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "保存并继续" }));
+    const save = screen.getByRole("button", { name: "保存并继续" });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
 
     expect(await screen.findByRole("heading", { name: "目标检测已完成" })).toBeVisible();
     const request = fetchMock.mock.calls[2][0] as Request;
@@ -599,7 +676,10 @@ describe("project pages", () => {
 
     renderAt("/projects/tunnel/depth");
     expect(await screen.findByText("未找到基线深度图，已从中灰度（128）开始编辑。")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "保存并继续" }));
+    // The button enables once the blank raster exists, a render after the hint.
+    const save = screen.getByRole("button", { name: "保存并继续" });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
 
     expect(await screen.findByRole("heading", { name: "深度图标注已完成" })).toBeVisible();
     const request = fetchMock.mock.calls[2][0] as Request;
@@ -608,5 +688,84 @@ describe("project pages", () => {
       result: { image_size: { width: 2, height: 2 }, pixels: "gICAgA==" },
     });
     getContext.mockRestore();
+  });
+
+  it("creates a project from the task-type menu and the property page", async () => {
+    fetchMock
+      .mockResolvedValueOnce(response([classificationType]))
+      .mockResolvedValueOnce(response([classificationType]))
+      .mockResolvedValueOnce(response({ ...streetProject, status: "empty", summary: {} }, 201))
+      .mockResolvedValueOnce(response({ ...streetProject, status: "empty", summary: { total: 0, pending: 0 } }));
+    renderAt();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /新建项目/ })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "新建项目" });
+    fireEvent.click(await within(dialog).findByRole("radio", { name: /图像分类/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "下一步" }));
+
+    const create = await screen.findByRole("button", { name: "创建项目" });
+    expect(create).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/^项目名称/), { target: { value: " Street " } });
+    const labels = screen.getByLabelText(/^标签/);
+    fireEvent.change(labels, { target: { value: "indoor, outdoor" } });
+    fireEvent.keyDown(labels, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "移除 indoor" })).toBeVisible();
+    fireEvent.click(create);
+
+    expect(await screen.findByRole("heading", { name: "Street" })).toBeVisible();
+    const request = fetchMock.mock.calls[2][0] as Request;
+    expect(request.method).toBe("POST");
+    await expect(request.clone().json()).resolves.toEqual({
+      name: "Street",
+      task_type: "classification",
+      settings: { labels: ["indoor", "outdoor"], mode: "single" },
+    });
+    expect(screen.getByRole("link", { name: /导入数据/ })).toHaveClass("primary");
+  });
+
+  it("keeps existing labels fixed once a project has annotations", async () => {
+    fetchMock
+      .mockResolvedValueOnce(response(streetProject))
+      .mockResolvedValueOnce(response(streetSettings()))
+      .mockResolvedValueOnce(
+        response(streetSettings({ values: { labels: ["indoor", "outdoor", "night"], mode: "single" } })),
+      )
+      .mockResolvedValueOnce(response(streetProject));
+    renderAt("/projects/street/settings");
+
+    expect(await screen.findByText("indoor")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "移除 indoor" })).toBeNull();
+    expect(screen.getByLabelText(/^选择方式/)).toBeDisabled();
+    const labels = screen.getByLabelText(/^标签/);
+    fireEvent.change(labels, { target: { value: "night" } });
+    fireEvent.keyDown(labels, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "移除 night" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "保存属性" }));
+
+    expect(await screen.findByText("已保存。")).toBeVisible();
+    const request = fetchMock.mock.calls[2][0] as Request;
+    expect(request.method).toBe("PUT");
+    await expect(request.clone().json()).resolves.toEqual({
+      name: "Street",
+      settings: { labels: ["indoor", "outdoor", "night"] },
+    });
+  });
+
+  it("deletes a project only after its name is typed", async () => {
+    fetchMock
+      .mockResolvedValueOnce(response(streetProject))
+      .mockResolvedValueOnce(response(streetSettings()))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    renderAt("/projects/street/settings");
+
+    const remove = await screen.findByRole("button", { name: "删除项目" });
+    expect(remove).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/以确认/), { target: { value: "Street" } });
+    fireEvent.click(remove);
+
+    expect(await screen.findByRole("heading", { name: "创建第一个标注项目" })).toBeVisible();
+    const request = fetchMock.mock.calls[2][0] as Request;
+    expect(request.method).toBe("DELETE");
+    expect(new URL(request.url).pathname).toBe("/api/projects/street");
   });
 });

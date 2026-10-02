@@ -1,7 +1,7 @@
 # Annotation Toolkits: web UI + API on one port (3000), with a CUDA runtime so
 # ReID extraction/mining can use the GPU.
 #
-#   python3 docker/build_and_run.py --data /path/to/projects-dir
+#   python3 docker/build_and_run.py --data /path/to/workspace-dir
 #
 # See docs/detailed_design/90_部署与运维.md for mounts and environment.
 
@@ -78,7 +78,7 @@ RUN groupadd -g ${APP_GID} app \
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-ENV ANNOTATION_PROJECTS_CONFIG=/data/projects.yaml \
+ENV ANNOTATION_WORKSPACE=/data \
     ANNOTATION_FRONTEND_DIST=/app/frontend \
     PORT=3000
 

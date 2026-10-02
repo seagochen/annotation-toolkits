@@ -1,7 +1,9 @@
 # Annotation Toolkits Frontend
 
-本地多任务标注平台的 React/TypeScript 前端。当前包含项目列表、项目详情、ReID 与图像
-分类工作台，以及供检测、分割和深度任务复用的图像画布原语。
+本地多任务标注平台的 React/TypeScript 前端：左侧导航 + 右侧工作区，包含新建项目、
+项目 dashboard（概览、导入数据、属性、导出）、六种任务的标注页面，以及供检测、分割和
+深度任务复用的图像画布原语。页面结构见
+[`docs/detailed_design/40_React前端.md`](../docs/detailed_design/40_React前端.md)。
 
 共享画布的坐标、图层、输入事件和快捷键契约见
 [`src/components/image-canvas/README.md`](src/components/image-canvas/README.md)。运行开发服务后
@@ -12,7 +14,7 @@
 先在仓库根目录启动后端：
 
 ```bash
-export ANNOTATION_PROJECTS_CONFIG=backend/configs/projects.example.yaml
+export ANNOTATION_WORKSPACE=./workspace
 uvicorn annotation_platform.server:app --app-dir backend --reload
 ```
 

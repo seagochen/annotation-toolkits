@@ -61,7 +61,8 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e 'backend[test]'
 
-export ANNOTATION_PROJECTS_CONFIG=backend/configs/projects.example.yaml
+# 工作区：项目配置、上传的数据和标注结果都保存在这里，首次使用时自动创建
+export ANNOTATION_WORKSPACE=./workspace
 uvicorn annotation_platform.server:app --app-dir backend --reload
 ```
 
@@ -73,7 +74,9 @@ npm install
 npm run dev
 ```
 
-浏览器访问 `http://127.0.0.1:5173`。服务默认监听 `127.0.0.1:8000`，接口文档见
+浏览器访问 `http://127.0.0.1:5173`，点左侧"新建项目"选择标注任务、填写属性，
+然后在项目里导入数据、标注和导出；项目只能在界面中创建和管理。关联服务器上已有的
+图片目录需要先用 `ANNOTATION_IMPORT_ROOTS` 允许该位置。服务默认监听 `127.0.0.1:8000`，接口文档见
 `http://127.0.0.1:8000/docs`；开发环境 CORS 默认只允许 `localhost:5173`/
 `127.0.0.1:5173`，其余来源与完整环境变量参考见
 [`docs/detailed_design/80_配置参考.md`](docs/detailed_design/80_配置参考.md)。
@@ -93,7 +96,7 @@ ReID 的数据约束、流水线接入和完整操作说明见 [`backend/README.
 cuDNN 9，供 ReID 抽取/候选挖掘使用 GPU（需要宿主机安装 NVIDIA Container Toolkit）。
 
 ```bash
-# <dir> 下需要有 projects.yaml；配置里引用的绝对路径目录用 --mount 原样挂载
+# <dir> 作为工作区挂载到 /data；要在界面中关联的服务器目录用 --mount 挂载
 python3 docker/build_and_run.py --data <dir> [--mount /abs/dataset/path ...]
 ```
 

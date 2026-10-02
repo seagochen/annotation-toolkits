@@ -11,12 +11,10 @@ else
   echo "GPU: none visible -- was the container started with '--gpus all'?"
 fi
 
-# --- project registry --------------------------------------------------------
-# The server only reads the registry per request, so a missing file would
-# otherwise surface as a 500 in the browser with nothing in the logs.
-if [ ! -f "${ANNOTATION_PROJECTS_CONFIG}" ]; then
-  echo "warning: ${ANNOTATION_PROJECTS_CONFIG} not found -- mount a directory" \
-       "containing projects.yaml at /data (see docker/build_and_run.py --data)"
-fi
+# --- workspace ----------------------------------------------------------------
+# No registry check: projects are created from the web UI, and a workspace
+# without projects.yaml is simply an empty project list.
+echo "workspace: ${ANNOTATION_WORKSPACE}" \
+     "(linkable directories: ${ANNOTATION_IMPORT_ROOTS:-workspace only})"
 
 exec uvicorn annotation_platform.server:app --host 0.0.0.0 --port "${PORT:-3000}" "$@"

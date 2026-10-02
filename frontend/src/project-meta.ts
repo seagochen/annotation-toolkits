@@ -11,12 +11,12 @@ export const statusLabels: Record<string, string> = {
 export type TaskEntry = Readonly<{ label: string; path: string; action: string }>;
 
 export const taskEntries: Record<string, TaskEntry> = {
-  reid: { label: "ReID 审核", path: "review", action: "开始审核候选" },
+  reid: { label: "行人重识别", path: "review", action: "开始审核候选" },
   classification: { label: "图像分类", path: "classify", action: "开始图像分类" },
   captioning: { label: "图像描述", path: "caption", action: "开始图像描述" },
   detection: { label: "目标检测", path: "detect", action: "开始目标检测" },
   segmentation: { label: "图像分割", path: "segment", action: "开始图像分割" },
-  depth: { label: "深度图", path: "depth", action: "开始深度图标注" },
+  depth: { label: "深度图修正", path: "depth", action: "开始深度图标注" },
 };
 
 export function taskLabel(taskType: string): string {

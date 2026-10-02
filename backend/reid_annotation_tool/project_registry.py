@@ -89,6 +89,10 @@ class ProjectRegistry:
             entries.append(entry)
         return cls(entries, source)
 
+    def entries(self) -> tuple[RegisteredProject, ...]:
+        """Loaded entries without computing status (which scans every dataset)."""
+        return tuple(self._entries.values())
+
     def list_projects(self) -> list[dict]:
         return [entry.describe() for entry in self._entries.values()]
 

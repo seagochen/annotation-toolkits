@@ -1,0 +1,68 @@
+.settings-form { display: grid; gap: 18px; }
+.form-group { display: grid; gap: 14px; min-width: 0; margin: 0; padding: 0; border: 0; }
+fieldset.form-group { padding-top: 14px; border-top: 1px solid var(--line); }
+.form-group legend, .form-group-collapsible summary { padding: 0; color: var(--muted); font-size: 0.72rem; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
+.form-group-collapsible { padding-top: 14px; border-top: 1px solid var(--line); }
+.form-group-collapsible summary { cursor: pointer; }
+.form-group-collapsible[open] summary { margin-bottom: 14px; }
+.form-group-collapsible > .form-field + .form-field { margin-top: 14px; }
+
+.form-field { display: grid; gap: 6px; }
+.form-field-inline { grid-template-columns: auto 1fr; align-items: center; }
+.form-field-inline .field-help { grid-column: 1 / -1; }
+.form-field label, .form-label { color: var(--ink); font-size: 0.86rem; font-weight: 650; }
+.required { color: var(--accent); }
+.form-field input[type="text"], .form-field input:not([type]), .form-field input[type="number"], .form-field select,
+.inline-form input, .danger-row input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--ink);
+  background: var(--surface-2);
+  font: inherit;
+  font-size: 0.9rem;
+}
+.form-field input:focus, .form-field select:focus, .inline-form input:focus, .danger-row input:focus, .code-editor:focus {
+  border-color: var(--brand-2);
+  outline: 3px solid rgba(49, 91, 71, 0.16);
+}
+.form-field input:disabled, .form-field select:disabled { color: var(--muted); background: var(--line); cursor: not-allowed; }
+.form-field input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--brand-2); }
+.mono, input.mono { font-family: var(--mono); font-size: 0.84rem; }
+.field-help { margin: 0; color: var(--muted); font-size: 0.78rem; line-height: 1.5; }
+.field-help code { margin-right: 6px; }
+.readonly-value { padding: 8px 11px; border-radius: 9px; background: var(--line); font: 0.84rem var(--mono); }
+
+.list-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 5px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+.list-input:focus-within { border-color: var(--brand-2); outline: 3px solid rgba(49, 91, 71, 0.16); }
+.list-input.disabled { background: var(--line); }
+/* Beats the generic `.form-field input` box: the chip row is the field's border. */
+.form-field .list-input input { flex: 1; width: auto; min-width: 140px; min-height: 28px; padding: 2px 6px; border: 0; background: transparent; font: inherit; font-size: 0.9rem; outline: none; }
+.list-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 4px; border-radius: 7px; color: var(--brand); background: var(--brand-soft); font-size: 0.85rem; }
+.list-chip-index { display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 5px; color: white; background: var(--brand-2); font: 600 0.68rem var(--mono); }
+.list-chip button { display: grid; width: 18px; height: 18px; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--brand); background: transparent; cursor: pointer; font-size: 0.95rem; line-height: 1; }
+.list-chip button:hover { color: white; background: var(--accent); }
+
+.code-editor {
+  width: 100%;
+  padding: 12px;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: #dce8df;
+  background: #17211b;
+  font: 0.82rem/1.55 var(--mono);
+  tab-size: 2;
+}
