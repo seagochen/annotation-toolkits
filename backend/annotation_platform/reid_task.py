@@ -43,6 +43,8 @@ class ReIDTaskType:
     def __init__(self) -> None:
         self._runners: dict[Path, JobRunner] = {}
         self._runners_lock = threading.Lock()
+        self._stores: dict[tuple[Path, Path | None], Store] = {}
+        self._stores_lock = threading.Lock()
 
     @staticmethod
     def _project(project: TaskProject) -> reid_config.Project:
@@ -61,14 +63,23 @@ class ReIDTaskType:
             )
         return TaskProject(project.path, project.dataset, project)
 
-    @staticmethod
-    def _store(project: reid_config.Project) -> Store:
-        return Store(
-            project.dataset,
-            project.live_round(),
-            project.base_pairs,
-            project.rounds(),
+    def _store(self, project: reid_config.Project) -> Store:
+        """One Store per live round, so its mtime caches survive across requests.
+
+        Keyed by the round file as well as the dataset: when ``mine`` opens a
+        new round, the next request gets a fresh Store for it.
+        """
+        candidates = project.live_round()
+        key = (
+            project.dataset.resolve(),
+            candidates.resolve() if candidates is not None else None,
         )
+        with self._stores_lock:
+            store = self._stores.get(key)
+            if store is None:
+                store = Store(project.dataset, candidates)
+                self._stores[key] = store
+            return store
 
     def queue(self, project: TaskProject, request: QueueRequest) -> QueuePage:
         selected = self._store(self._project(project)).queue(

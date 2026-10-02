@@ -662,7 +662,7 @@ def _read_mapping(path: Path) -> dict:
 
 
 def _dump(document: Mapping) -> str:
-    # Not comment-preserving (PyYAML), like reid_annotation_tool.config.dump;
+    # Not comment-preserving (PyYAML);
     # the raw config editor writes text verbatim when comments matter.
     return yaml.safe_dump(dict(document), allow_unicode=True, sort_keys=False)
 

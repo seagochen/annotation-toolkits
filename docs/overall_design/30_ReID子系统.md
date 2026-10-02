@@ -25,7 +25,7 @@ flowchart LR
     Finalize --> Handoff[训练交接]
 ```
 
-普通平台提交采用不覆盖策略；ReID 领域的修订与关系维护工具拥有另外的证据优先级和修订限制，不能将这些能力推导成通用图像标注的编辑接口。规则与入口参照 [revision.py](../../backend/reid_annotation_tool/revision.py) 及操作手册。
+普通平台提交采用不覆盖策略，ReID 审核同样如此：平台不提供修改已保存判定或冲突详情的入口。更正通过后续审核轮次重新作答完成，合并审核轮次时同一关系以最新一轮的人工回答为准（[core.py](../../backend/reid_annotation_tool/core.py) `supersede`）；机器得出的物理证据不被人工判定覆盖，二者矛盾时由冲突检测报告。
 
 ## 3. 执行模型与失败传播
 

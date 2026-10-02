@@ -17,8 +17,6 @@
 | [`review_store.py`](../../backend/reid_annotation_tool/review_store.py) | 审核队列访问 + 原子 CSV 标签持久化（平台 API 与 CLI 共用） |
 | [`conflicts.py`](../../backend/reid_annotation_tool/conflicts.py) | 身份关系图上的逻辑冲突检测 |
 | [`domain.py`](../../backend/reid_annotation_tool/domain.py) | 跨天/跨相机关系归档（同日同机位约束） |
-| [`provenance.py`](../../backend/reid_annotation_tool/provenance.py) | 每条关系判定的溯源展开 |
-| [`revision.py`](../../backend/reid_annotation_tool/revision.py) | Web 端修订已有人工判定（最新判定覆盖旧判定） |
 | [`registry.py`](../../backend/reid_annotation_tool/registry.py) | 命名的 PyTorch checkpoint 注册表 |
 | [`handoff.py`](../../backend/reid_annotation_tool/handoff.py) | 把定版数据集交给外部训练脚本，记录交接内容 |
 | [`jobs.py`](../../backend/reid_annotation_tool/jobs.py) | 后台任务执行器：一次一个，包装 `app.py` 的阶段函数 |

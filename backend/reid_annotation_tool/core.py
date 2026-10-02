@@ -140,7 +140,7 @@ def answer_key(row: dict) -> tuple:
 def supersede(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     """One answer per question: on one relation the newest round wins.
 
-    This is the dataset's correction rule (see revision.py), and it has to be
+    This is the dataset's correction rule, and it has to be
     applied wherever review rounds are merged. Without it a reviewer who
     revisits an old question and changes their mind does not correct the
     dataset — they contradict it, and the checks report a `direct_contradiction`
@@ -163,9 +163,6 @@ def supersede(rows: list[dict[str, str]]) -> list[dict[str, str]]:
 def load_reviews(paths: list[Path]) -> list[dict[str, str]]:
     """Read review rounds, oldest first, and keep one answer per question.
 
-    The conflict detail page deliberately does NOT come through here: "who
-    said what, when" is exactly the history this collapses, so provenance.py
-    reads the round files itself.
     """
     rows = []
     for path in paths:
@@ -218,33 +215,6 @@ def build_constraints(base_rows: list[dict], review_rows: list[dict]):
         if graph.same(left, right)
     ]
     return graph, negatives, conflicts
-
-
-def dataset_status(root: Path, base_pairs: Path, reviews: list[Path]) -> dict:
-    base_rows = read_csv(base_pairs)
-    review_rows = load_reviews(reviews)
-    _, _, conflicts = build_constraints(base_rows, review_rows)
-    labels = Counter(row["review_label"] or "pending" for row in review_rows)
-    kinds = Counter(f"{row.get('kind', 'cross_track')}:"
-                    f"{row['review_label'] or 'pending'}" for row in review_rows)
-    pairs = Counter((row["split"], int(row["label"])) for row in base_rows)
-    return {
-        "schema": 1,
-        "dataset_root": str(root),
-        "base_pairs": str(base_pairs),
-        "base_pairs_sha256": sha256(base_pairs),
-        "review_files": [str(path) for path in reviews],
-        "review_labels": dict(sorted(labels.items())),
-        "review_kinds": dict(sorted(kinds.items())),
-        "pending_reviews": labels.get("pending", 0),
-        "graph_conflicts": len(conflicts),
-        "conflicts": conflicts,
-        "contaminated_tracks": sorted(contaminated_tracks(review_rows)),
-        "pair_counts": {
-            split: {"positive": pairs[(split, 1)], "negative": pairs[(split, 0)]}
-            for split in ("train", "val", "test")
-        },
-    }
 
 
 def representative_images(root: Path) -> dict[str, str]:

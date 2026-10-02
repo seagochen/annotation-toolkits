@@ -52,7 +52,7 @@ def test_failed_review_label_save_leaves_no_temporary(dataset, failing_replace):
     write_csv(review, CANDIDATE_FIELDS, [candidate("c1", "a", "b")])
     before = review.read_text(encoding="utf-8")
     with pytest.raises(OSError, match="replace failed"):
-        Store(dataset, review, dataset / "pairs.csv", [review]).set_label("c1", "same", None)
+        Store(dataset, review).set_label("c1", "same", None)
     assert review.read_text(encoding="utf-8") == before
     assert not list(dataset.glob("*.tmp"))
 
@@ -78,6 +78,6 @@ def test_failed_job_record_save_leaves_no_temporary(tmp_path, monkeypatch):
 def test_review_store_and_platform_modules_share_one_lock_per_path(dataset):
     review = dataset / "review.csv"
     write_csv(review, CANDIDATE_FIELDS, [candidate("c1", "a", "b")])
-    store = Store(dataset, review, dataset / "pairs.csv", [review])
+    store = Store(dataset, review)
     assert store.lock is platform_lock(review)
     assert store.lock is local_files.file_lock(dataset / "." / "review.csv")
