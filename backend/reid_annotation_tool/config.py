@@ -233,18 +233,29 @@ def resolve(base: Path, value: str | Path) -> Path:
     return path if path.is_absolute() else (base / path).resolve()
 
 
-def apply_override(sections: dict, override: str) -> None:
-    """``section.key=value`` from the command line, parsed as YAML scalar."""
+def parse_override(override: str, source: str = "--set") -> tuple[str, str, object]:
+    """Split one ``section.key=value`` override; the value is parsed as YAML.
+
+    The one parser for every override list: the CLI's ``--set`` and the
+    trainer/evaluator ``train.set``/``evaluate.set`` entries. ``source`` names
+    where the override came from, for the error message.
+    """
     name, _, rest = override.partition(".")
     key, _, raw = rest.partition("=")
-    if not name or not key or not rest.count("="):
-        raise ConfigError(f"--set expects section.key=value, got {override!r}")
+    if not name or not key or "=" not in rest:
+        raise ConfigError(f"{source} expects section.key=value, got {override!r}")
+    return name, key, yaml.safe_load(raw)
+
+
+def apply_override(sections: dict, override: str) -> None:
+    """``section.key=value`` from the command line, onto the project sections."""
+    name, key, value = parse_override(override)
     if name not in sections:
         raise ConfigError(f"--set: unknown section {name!r}")
     if name not in OPEN_SECTIONS and key not in DEFAULTS[name]:
         raise ConfigError(f"--set: unknown `{name}` key {key!r}"
                           + retired_hint(name, [key]))
-    sections[name][key] = yaml.safe_load(raw)
+    sections[name][key] = value
 
 
 class Project:

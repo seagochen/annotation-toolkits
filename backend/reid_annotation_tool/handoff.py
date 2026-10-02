@@ -28,6 +28,7 @@ from pathlib import Path
 import yaml
 
 from . import conflicts as conflict_engine
+from .config import ConfigError, parse_override
 from .core import atomic_write_json, read_csv, sha256
 
 TASK_DIRECTORY = {"reid": "reid", "cls": "cls", "both": "both"}
@@ -83,6 +84,33 @@ def pair_provenance(path: Path) -> dict:
     }
 
 
+def _load_base_config(path, stage: str, receives: str) -> dict:
+    """The user's own trainer/evaluator config, or an empty one with a note."""
+    if not path:
+        print(f"note: {stage}.base_config is empty, so the {receives} and must "
+              "supply its own defaults", flush=True)
+        return {}
+    config = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    if not isinstance(config, dict):
+        raise SystemExit(f"{path}: base config must be a YAML mapping")
+    return config
+
+
+def _apply_overrides(config: dict, overrides: list[str], stage: str,
+                     owned: tuple[tuple[str, str], ...], derived_from: str) -> None:
+    """``{stage}.set`` entries onto the config; keys this tool owns are refused."""
+    for override in overrides or []:
+        try:
+            section, key, value = parse_override(override, f"{stage}.set")
+        except ConfigError as error:
+            raise SystemExit(str(error)) from error
+        if (section, key) in owned:
+            raise SystemExit(
+                f"{section}.{key} is derived from the project ({derived_from}) "
+                "and cannot be overridden here")
+        config.setdefault(section, {})[key] = value
+
+
 def build_config(root: Path, args, project: Path) -> dict:
     """The user's own trainer config, plus the four keys only this tool knows.
 
@@ -90,26 +118,11 @@ def build_config(root: Path, args, project: Path) -> dict:
     is a dataset tool, and a backbone or a learning rate is not a property of a
     dataset.
     """
-    config: dict = {}
-    if args.base_config:
-        config = yaml.safe_load(Path(args.base_config).read_text(encoding="utf-8")) or {}
-        if not isinstance(config, dict):
-            raise SystemExit(f"{args.base_config}: base config must be a YAML mapping")
-    else:
-        print("note: train.base_config is empty, so the trainer receives only the "
-              "dataset and output paths and must supply its own defaults", flush=True)
-
-    for override in args.set or []:
-        section, _, rest = override.partition(".")
-        key, _, value = rest.partition("=")
-        if not section or not key or "=" not in rest:
-            raise SystemExit(f"--set expects section.key=value, got {override!r}")
-        if (section, key) in OWNED:
-            raise SystemExit(
-                f"{section}.{key} is derived from the project (dataset root, "
-                "train.pairs, train.name) and cannot be overridden here")
-        config.setdefault(section, {})[key] = yaml.safe_load(value)
-
+    config = _load_base_config(
+        args.base_config, "train",
+        "trainer receives only the dataset and output paths")
+    _apply_overrides(config, args.set, "train", OWNED,
+                     "dataset root, train.pairs, train.name")
     # Written last so no override can point the trainer at another dataset.
     config.setdefault("data", {}).update({"reid_root": str(root), "reid_csv": args.pairs})
     config.setdefault("output", {}).update({"project": str(project), "name": args.name})
@@ -166,26 +179,11 @@ def build_eval_config(root: Path, args, project: Path, checkpoint: Path) -> dict
     file name to glob for a metrics file -- the host tells the evaluator
     exactly where to write it.
     """
-    config: dict = {}
-    if args.base_config:
-        config = yaml.safe_load(Path(args.base_config).read_text(encoding="utf-8")) or {}
-        if not isinstance(config, dict):
-            raise SystemExit(f"{args.base_config}: base config must be a YAML mapping")
-    else:
-        print("note: evaluate.base_config is empty, so the evaluator receives only "
-              "the dataset/checkpoint/output paths and must supply its own defaults",
-              flush=True)
-
-    for override in args.set or []:
-        section, _, rest = override.partition(".")
-        key, _, value = rest.partition("=")
-        if not section or not key or "=" not in rest:
-            raise SystemExit(f"--set expects section.key=value, got {override!r}")
-        if (section, key) in EVAL_OWNED:
-            raise SystemExit(
-                f"{section}.{key} is derived from the project (dataset root, "
-                "evaluate.pairs/checkpoint/name) and cannot be overridden here")
-        config.setdefault(section, {})[key] = yaml.safe_load(value)
+    config = _load_base_config(
+        args.base_config, "evaluate",
+        "evaluator receives only the dataset/checkpoint/output paths")
+    _apply_overrides(config, args.set, "evaluate", EVAL_OWNED,
+                     "dataset root, evaluate.pairs/checkpoint/name")
 
     # Written last so no override can point the evaluator at another dataset
     # or checkpoint.
@@ -196,6 +194,58 @@ def build_eval_config(root: Path, args, project: Path, checkpoint: Path) -> dict
         "metrics_path": str(project / "metrics.json"),
     })
     return config
+
+
+def _pairs_path(root: Path, pairs: str) -> Path:
+    path = root / pairs if not Path(pairs).is_absolute() else Path(pairs)
+    if not path.is_file():
+        raise SystemExit(f"pair CSV not found: {path}")
+    return path
+
+
+def _conflict_gate(root: Path, pairs: Path, args, stage: str, verb: str) -> dict:
+    """Refuse to hand over a dataset whose identity logic contradicts itself."""
+    reviews = [root / path for path in (args.review or [])]
+    gate = conflict_engine.report(root, pairs, [path for path in reviews if path.is_file()])
+    if gate["errors"] and not args.allow_conflicts:
+        raise SystemExit(
+            f"refusing to {verb}: {gate['errors']} identity-logic conflicts\n"
+            + conflict_engine.main_text(gate)
+            + f"\nresolve them in a new review round, or set "
+              f"`{stage}.allow_conflicts: true` to override")
+    return gate
+
+
+def _write_config(workspace: Path, config: dict) -> Path:
+    config_path = workspace / "config.yaml"
+    config_path.write_text(yaml.dump(config, allow_unicode=True, sort_keys=False),
+                           encoding="utf-8")
+    print(f"config: {config_path}", flush=True)
+    return config_path
+
+
+def _manifest(root: Path, pairs: Path, counts: dict, inputs: dict, gate: dict,
+              tool: tuple[str, Path], command: list[str], config: dict) -> dict:
+    """The fields every handoff records; ``inputs`` are the stage's own hashes
+    (training: dataset files; evaluation: the checkpoint)."""
+    role, path = tool
+    return {
+        "schema": 1, "created_at": datetime.now().astimezone().isoformat(),
+        "dataset_root": str(root), "pairs": str(pairs), "pairs_sha256": sha256(pairs),
+        "pair_counts": counts, "pair_provenance": pair_provenance(pairs),
+        **inputs,
+        "conflict_gate": {key: gate[key]
+                          for key in ("errors", "warnings", "pending_reviews", "by_kind")},
+        role: str(path), f"{role}_git": git_revision(path),
+        "command": command, "config": config,
+    }
+
+
+def _save_dry_run(path: Path, manifest: dict) -> dict:
+    manifest["status"] = "dry-run"
+    atomic_write_json(path, manifest)
+    print(json.dumps(manifest, ensure_ascii=False, indent=2))
+    return manifest
 
 
 def evaluate(root: Path, args) -> dict:
@@ -211,17 +261,8 @@ def evaluate(root: Path, args) -> dict:
     checkpoint = Path(args.checkpoint)
     if not checkpoint.is_file():
         raise SystemExit(f"checkpoint not found: {checkpoint}")
-    pairs = root / args.pairs if not Path(args.pairs).is_absolute() else Path(args.pairs)
-    if not pairs.is_file():
-        raise SystemExit(f"pair CSV not found: {pairs}")
-
-    reviews = [root / path for path in (args.review or [])]
-    gate = conflict_engine.report(root, pairs, [path for path in reviews if path.is_file()])
-    if gate["errors"] and not args.allow_conflicts:
-        raise SystemExit(
-            f"refusing to evaluate: {gate['errors']} identity-logic conflicts\n"
-            + conflict_engine.main_text(gate)
-            + "\nresolve them in the review UI, or pass --allow-conflicts to override")
+    pairs = _pairs_path(root, args.pairs)
+    gate = _conflict_gate(root, pairs, args, "evaluate", "evaluate")
     counts = split_label_counts(read_csv(pairs))
     value = counts.get(args.split, {"positive": 0, "negative": 0})
     if not value["positive"] or not value["negative"]:
@@ -233,27 +274,14 @@ def evaluate(root: Path, args) -> dict:
     workspace.mkdir(parents=True, exist_ok=True)
     project = workspace / "runs"
     config = build_eval_config(root, args, project, checkpoint)
-    config_path = workspace / "config.yaml"
-    config_path.write_text(yaml.dump(config, allow_unicode=True, sort_keys=False),
-                           encoding="utf-8")
-    print(f"config: {config_path}", flush=True)
+    config_path = _write_config(workspace, config)
 
     command = [args.python, str(entry), "--config", str(config_path)]
-    manifest = {
-        "schema": 1, "created_at": datetime.now().astimezone().isoformat(),
-        "dataset_root": str(root), "pairs": str(pairs), "pairs_sha256": sha256(pairs),
-        "pair_counts": counts, "pair_provenance": pair_provenance(pairs),
-        "checkpoint": str(checkpoint), "checkpoint_sha256": sha256(checkpoint),
-        "conflict_gate": {k: gate[k] for k in
-                                                 ("errors", "warnings", "pending_reviews", "by_kind")},
-        "evaluator": str(evaluator), "evaluator_git": git_revision(evaluator),
-        "command": command, "config": config,
-    }
+    inputs = {"checkpoint": str(checkpoint), "checkpoint_sha256": sha256(checkpoint)}
+    manifest = _manifest(root, pairs, counts, inputs, gate, ("evaluator", evaluator),
+                         command, config)
     if args.dry_run:
-        manifest["status"] = "dry-run"
-        atomic_write_json(workspace / "eval-manifest.json", manifest)
-        print(json.dumps(manifest, ensure_ascii=False, indent=2))
-        return manifest
+        return _save_dry_run(workspace / "eval-manifest.json", manifest)
 
     code = run(command, evaluator, getattr(args, "sink", None))
     manifest["exit_code"] = code
@@ -275,45 +303,23 @@ def train(root: Path, args) -> dict:
     entry = trainer / "scripts" / "train.py"
     if not entry.is_file():
         raise SystemExit(f"trainer entry point not found: {entry}")
-    pairs = root / args.pairs if not Path(args.pairs).is_absolute() else Path(args.pairs)
-    if not pairs.is_file():
-        raise SystemExit(f"pair CSV not found: {pairs}")
-
-    reviews = [root / path for path in (args.review or [])]
-    gate = conflict_engine.report(root, pairs, [path for path in reviews if path.is_file()])
-    if gate["errors"] and not args.allow_conflicts:
-        raise SystemExit(
-            f"refusing to train: {gate['errors']} identity-logic conflicts\n"
-            + conflict_engine.main_text(gate)
-            + "\nresolve them in the review UI, or pass --allow-conflicts to override")
+    pairs = _pairs_path(root, args.pairs)
+    gate = _conflict_gate(root, pairs, args, "train", "train")
     counts = validate_pairs(pairs, args.tasks)
 
     workspace = root / "training" / args.name
     workspace.mkdir(parents=True, exist_ok=True)
     project = workspace / "runs"
     config = build_config(root, args, project)
-    config_path = workspace / "config.yaml"
-    config_path.write_text(yaml.dump(config, allow_unicode=True, sort_keys=False),
-                           encoding="utf-8")
-    print(f"config: {config_path}", flush=True)
+    config_path = _write_config(workspace, config)
 
     command = [args.python, str(entry), "--config", str(config_path)]
-    manifest = {
-        "schema": 1, "created_at": datetime.now().astimezone().isoformat(),
-        "dataset_root": str(root), "pairs": str(pairs), "pairs_sha256": sha256(pairs),
-        "pair_counts": counts, "pair_provenance": pair_provenance(pairs),
-        "dataset_hashes": {name: sha256(root / name) for name in
-                           ("identities.csv", "tracks.csv") if (root / name).is_file()},
-        "conflict_gate": {k: gate[k] for k in
-                                                 ("errors", "warnings", "pending_reviews", "by_kind")},
-        "trainer": str(trainer), "trainer_git": git_revision(trainer),
-        "command": command, "config": config,
-    }
+    inputs = {"dataset_hashes": {name: sha256(root / name) for name in
+                                 ("identities.csv", "tracks.csv") if (root / name).is_file()}}
+    manifest = _manifest(root, pairs, counts, inputs, gate, ("trainer", trainer),
+                         command, config)
     if args.dry_run:
-        manifest["status"] = "dry-run"
-        atomic_write_json(workspace / "training-manifest.json", manifest)
-        print(json.dumps(manifest, ensure_ascii=False, indent=2))
-        return manifest
+        return _save_dry_run(workspace / "training-manifest.json", manifest)
 
     code = run(command, trainer, getattr(args, "sink", None))
     manifest["exit_code"] = code
