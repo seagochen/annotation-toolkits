@@ -10,14 +10,20 @@ export const statusLabels: Record<string, string> = {
 
 export type TaskEntry = Readonly<{ label: string; path: string; action: string }>;
 
-export const taskEntries: Record<string, TaskEntry> = {
+const TASK_ENTRIES = {
   reid: { label: "行人重识别", path: "review", action: "开始审核候选" },
   classification: { label: "图像分类", path: "classify", action: "开始图像分类" },
   captioning: { label: "图像描述", path: "caption", action: "开始图像描述" },
   detection: { label: "目标检测", path: "detect", action: "开始目标检测" },
   segmentation: { label: "图像分割", path: "segment", action: "开始图像分割" },
   depth: { label: "深度图修正", path: "depth", action: "开始深度图标注" },
-};
+} as const satisfies Record<string, TaskEntry>;
+
+/** The task types the frontend has pages for; tasks/pages.ts must cover each. */
+export type TaskType = keyof typeof TASK_ENTRIES;
+
+/** Task type → label, route segment and entry text: the one place they are defined. */
+export const taskEntries: Readonly<Record<string, TaskEntry>> = TASK_ENTRIES;
 
 export function taskLabel(taskType: string): string {
   return taskEntries[taskType]?.label ?? taskType;

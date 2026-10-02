@@ -53,3 +53,4 @@ export {
   toImageData,
 } from "./raster-buffer";
 export type { Colorize, RasterBuffer } from "./raster-buffer";
+export { drawRaster, useRasterBrush } from "./raster-brush";

@@ -10,12 +10,7 @@ import { ProjectImportPage } from "./pages/project/ProjectImportPage";
 import { ProjectOverviewPage } from "./pages/project/ProjectOverviewPage";
 import { ProjectSettingsPage } from "./pages/project/ProjectSettingsPage";
 import { taskEntries } from "./project-meta";
-import { CaptionReviewPage } from "./tasks/caption/CaptionReviewPage";
-import { ClassificationReviewPage } from "./tasks/classification/ClassificationReviewPage";
-import { DepthReviewPage } from "./tasks/depth/DepthReviewPage";
-import { DetectionReviewPage } from "./tasks/detection/DetectionReviewPage";
-import { ReIDReviewPage } from "./tasks/reid/ReIDReviewPage";
-import { SegmentationReviewPage } from "./tasks/segmentation/SegmentationReviewPage";
+import { taskPages } from "./tasks/pages";
 
 const ANNOTATION_PATH = new RegExp(
   `^/projects/[^/]+/(${Object.values(taskEntries).map((entry) => entry.path).join("|")})$`,
@@ -49,12 +44,13 @@ export function App() {
             <Route path="/projects/:projectId/import" component={ProjectImportPage} />
             <Route path="/projects/:projectId/settings" component={ProjectSettingsPage} />
             <Route path="/projects/:projectId/export" component={ProjectExportPage} />
-            <Route path="/projects/:projectId/classify" component={ClassificationReviewPage} />
-            <Route path="/projects/:projectId/caption" component={CaptionReviewPage} />
-            <Route path="/projects/:projectId/detect" component={DetectionReviewPage} />
-            <Route path="/projects/:projectId/segment" component={SegmentationReviewPage} />
-            <Route path="/projects/:projectId/depth" component={DepthReviewPage} />
-            <Route path="/projects/:projectId/review" component={ReIDReviewPage} />
+            {Object.entries(taskPages).map(([taskType, page]) => (
+              <Route
+                component={page}
+                key={taskType}
+                path={`/projects/:projectId/${taskEntries[taskType].path}`}
+              />
+            ))}
             <Route path="/projects/:projectId" component={ProjectOverviewPage} />
             <Route component={NotFoundPage} />
           </Switch>

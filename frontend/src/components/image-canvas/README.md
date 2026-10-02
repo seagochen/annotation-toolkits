@@ -44,6 +44,8 @@ type ImageCanvasLayer = {
   （`stampAt`/`strokeSegment`/`fillPolygon`，像素值即类别索引，0 为背景），
   `polygon-tool.ts` 只管顶点增删/闭合的纯状态机；多边形闭合后由页面调用
   `fillPolygon` 落到同一张栅格里，后端只接收整图栅格，不理解多边形。
+- 分割与深度共用 `raster-brush.ts`：`drawRaster` 把缓冲区画进图层，
+  `useRasterBrush` 是画笔的指针状态机，页面只提供半径与每像素的 `apply`。
 - #22 depth：灰度 depth raster layer 设置所需 blend mode，brush 仍接收
   图像坐标，直接复用 `raster-buffer.ts`（不建立第二套画笔），用
   `loadFromImageElement` 从已获取的基线深度图水合初始栅格。

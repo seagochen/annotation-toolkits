@@ -50,9 +50,11 @@
 渲染，字段的 `lock`（已有标注后 `append_only`/`locked`）与 `server_only`（只读）
 在前端只用于提示和禁用，最终由后端校验。
 
-`App.tsx` 按固定路径把每种 `task_type` 映射到一个标注页面组件，导航与概览页按
-`project-meta.ts` 的 `taskEntries` 表生成入口链接。新增任务类型需要同时改 `App.tsx`
-与 `taskEntries` 两处——没有从 `task_type` 到路由的自动派生（见 #33）。
+`task_type` 到路由路径、名称与入口文案的映射只在 `project-meta.ts` 的
+`taskEntries` 定义一次：导航、概览页的入口链接和 `App.tsx` 的标注页路由都由它生成。
+每种任务的页面组件登记在 `tasks/pages.ts` 的 `taskPages`，它以 `TaskType`
+（`taskEntries` 的键）为键，漏登记或多登记都无法通过类型检查。新增任务类型 = 在
+`taskEntries` 加一行 + 在 `taskPages` 登记页面。
 
 ## 3. 接口一览
 
@@ -76,7 +78,13 @@ flowchart LR
     ShowError --> Render
 ```
 
-`ClassificationReviewPage.tsx`/`CaptionReviewPage.tsx` 没有画布，直接照此流程；
+这个循环只实现一次：`tasks/useTaskQueue.tsx` 的 `useTaskQueue(projectId, { taskType,
+wrongType, onLoad })` 并行读取项目与待处理队列、拒绝其他任务类型的项目、在提交成功后
+重新读取队列，并持有 `submitting`/`submitError`；`QueueFallback` 渲染加载、错误（可
+重试）与"已完成"三种状态；`itemText`、`summaryStrings` 是读取队列项与项目摘要的共享
+helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与提交的 `result` 形状。
+
+`ClassificationReviewPage.tsx`/`CaptionReviewPage.tsx` 没有画布；
 `DetectionReviewPage.tsx`/`SegmentationReviewPage.tsx`/`DepthReviewPage.tsx` 在
 "渲染标注界面"这一步额外挂载 `ImageCanvas` + 对应的画布图元。
 
@@ -91,6 +99,7 @@ flowchart LR
 | `geometry.ts` / `shortcuts.ts` | 全部三个画布任务 | 视口缩放/平移的纯函数，快捷键绑定与冲突检测 |
 | `box-tool.ts` | 检测 | 创建/选中/移动/8 向 handle 缩放/删除检测框的纯函数状态机 |
 | `polygon-tool.ts` | 分割 | 顶点增删/闭合/撤销的纯状态机，只管矢量顶点 |
+| `raster-brush.ts` | 分割 + 深度 | `drawRaster`（把栅格画进图层）与 `useRasterBrush`（画笔指针状态机：按下盖章、拖动连线、抬起结束），两页共用同一份实现 |
 | `raster-buffer.ts` | 分割 + 深度 | 可原地绘制的 `Uint8ClampedArray` 像素缓冲区：`stampAt`/`strokeSegment`（画笔）、`fillPolygon`（多边形栅格化）、`toBase64`（提交）、`loadFromImageElement`/`toImageData`（读取已有 PNG、渲染预览） |
 
 `polygon-tool.ts` 产出的多边形闭合后会立即调用 `raster-buffer.ts` 的 `fillPolygon`

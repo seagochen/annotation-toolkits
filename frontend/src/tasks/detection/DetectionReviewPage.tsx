@@ -1,18 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useParams } from "wouter";
 
-import {
-  getProject,
-  getQueue,
-  projectFileUrl,
-  submitAnnotation,
-  type ProjectDetail,
-  type QueueResponse,
-} from "../../api/client";
-import { ErrorState, LoadingState } from "../../components/AsyncState";
+import { projectFileUrl } from "../../api/client";
+import { LoadingState } from "../../components/AsyncState";
 import {
   CANVAS_HINTS,
-  CompleteState,
   OptionList,
   PanelSection,
   SubmitBar,
@@ -22,6 +14,7 @@ import { categoryColor } from "../../components/workspace/palette";
 import { DIGIT_KEYS, MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
 import { summaryProgress } from "../../project-meta";
 import { useImageSize } from "../useImageSize";
+import { QueueFallback, itemText, summaryStrings, useTaskQueue } from "../useTaskQueue";
 import {
   ImageCanvas,
   type ImageCanvasLayer,
@@ -42,75 +35,33 @@ import {
   type BoxToolState,
 } from "../../components/image-canvas/box-tool";
 
-type QueueItem = QueueResponse["items"][number];
-type ReadyState = { project: ProjectDetail; queue: QueueResponse };
-type PageState =
-  | { kind: "loading" }
-  | ({ kind: "ready" } & ReadyState)
-  | { kind: "error"; message: string };
-
 const HANDLE_SCREEN_SIZE = 8;
 const MIN_BOX_SCREEN_SIZE = 3;
 
-function itemText(item: QueueItem, key: string): string {
-  const value = item[key];
-  return value == null ? "" : String(value);
-}
-
-function configuredCategories(project: ProjectDetail): string[] {
-  const value = project.summary.categories;
-  return Array.isArray(value)
-    ? value.filter((category): category is string => typeof category === "string")
-    : [];
-}
-
 export function DetectionReviewPage() {
   const { projectId = "" } = useParams();
-  const [state, setState] = useState<PageState>({ kind: "loading" });
   const [tool, setTool] = useState<BoxToolState>(createBoxToolState());
   const [mode, setMode] = useState<"select" | "draw">("select");
   const [category, setCurrentCategory] = useState("");
   const [previewPoint, setPreviewPoint] = useState<Point | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState("");
   const viewportRef = useRef<Viewport>({ scale: 1, offset: { x: 0, y: 0 } });
 
-  const load = useCallback(async () => {
-    setState({ kind: "loading" });
-    setSubmitError("");
-    try {
-      const [project, queue] = await Promise.all([
-        getProject(projectId),
-        getQueue(projectId),
-      ]);
-      if (project.task_type !== "detection") {
-        setState({ kind: "error", message: "该项目不是目标检测任务。" });
-        return;
-      }
+  const queue = useTaskQueue(projectId, {
+    taskType: "detection",
+    wrongType: "该项目不是目标检测任务。",
+    onLoad: (project) => {
       setTool(createBoxToolState());
       setMode("select");
-      const categories = configuredCategories(project);
-      setCurrentCategory(categories[0] ?? "");
-      setState({ kind: "ready", project, queue });
-    } catch (error) {
-      setState({
-        kind: "error",
-        message: error instanceof Error ? error.message : "未知错误",
-      });
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const item = state.kind === "ready" ? state.queue.items[0] : undefined;
+      setCurrentCategory(summaryStrings(project, "categories")[0] ?? "");
+    },
+  });
+  const { ready, item, submitting, submitError } = queue;
   const imagePath = item ? itemText(item, "image_path") : undefined;
   const imageUrl = imagePath ? projectFileUrl(projectId, imagePath) : undefined;
   const imageSize = useImageSize(imageUrl);
   const categories = useMemo(
-    () => (state.kind === "ready" ? configuredCategories(state.project) : []),
-    [state],
+    () => (ready ? summaryStrings(ready.project, "categories") : []),
+    [ready],
   );
 
   const layer: ImageCanvasLayer = useMemo(
@@ -204,24 +155,12 @@ export function DetectionReviewPage() {
   }
 
   async function submit() {
-    if (!item || !imageSize || submitting) return;
-    setSubmitting(true);
-    setSubmitError("");
-    try {
-      await submitAnnotation(projectId, itemText(item, "item_id"), {
-        image_size: imageSize,
-        boxes: tool.boxes.map(({ id: _id, ...box }: Box) => box),
-      });
-      const queue = await getQueue(projectId);
-      setState((current) =>
-        current.kind === "ready" ? { ...current, queue } : current,
-      );
-      setTool(createBoxToolState());
-    } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "未知错误");
-    } finally {
-      setSubmitting(false);
-    }
+    if (!item || !imageSize) return;
+    const saved = await queue.submit(itemText(item, "item_id"), {
+      image_size: imageSize,
+      boxes: tool.boxes.map(({ id: _id, ...box }: Box) => box),
+    });
+    if (saved) setTool(createBoxToolState());
   }
 
   function chooseCategory(next: string) {
@@ -282,16 +221,14 @@ export function DetectionReviewPage() {
   ];
   useHotkeys(hotkeys, Boolean(item));
 
-  if (state.kind === "loading") return <LoadingState>正在读取检测队列…</LoadingState>;
-  if (state.kind === "error") {
-    return <ErrorState message={state.message} onRetry={() => void load()} />;
-  }
-  if (!item) {
+  if (!ready || !item) {
     return (
-      <CompleteState
-        description="当前没有待标注图像，所有结果均已原子写入本地 JSON。"
+      <QueueFallback
+        doneDescription="当前没有待标注图像，所有结果均已原子写入本地 JSON。"
+        doneTitle="目标检测已完成"
+        loading="正在读取检测队列…"
         projectId={projectId}
-        title="目标检测已完成"
+        queue={queue}
       />
     );
   }
@@ -382,10 +319,10 @@ export function DetectionReviewPage() {
           </PanelSection>
         </>
       }
-      progress={summaryProgress(state.project.summary, state.queue.total)}
+      progress={summaryProgress(ready.project.summary, ready.queue.total)}
       projectId={projectId}
-      projectName={state.project.name}
-      remaining={state.queue.total}
+      projectName={ready.project.name}
+      remaining={ready.queue.total}
       stage={
         imageSize && imageUrl ? (
           <ImageCanvas

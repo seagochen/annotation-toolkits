@@ -1,18 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "wouter";
 
-import {
-  getProject,
-  getQueue,
-  projectFileUrl,
-  submitAnnotation,
-  type ProjectDetail,
-  type QueueResponse,
-} from "../../api/client";
-import { ErrorState, LoadingState } from "../../components/AsyncState";
+import { projectFileUrl } from "../../api/client";
+import { LoadingState } from "../../components/AsyncState";
 import {
   CANVAS_HINTS,
-  CompleteState,
   OptionList,
   PanelSection,
   RangeField,
@@ -25,6 +17,8 @@ import { DIGIT_KEYS, MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../..
 import { summaryProgress } from "../../project-meta";
 import {
   ImageCanvas,
+  drawRaster,
+  useRasterBrush,
   type ImageCanvasLayer,
   type ImageCanvasPointerEvent,
   type Viewport,
@@ -41,38 +35,17 @@ import {
 import {
   createRasterBuffer,
   fillPolygon,
-  stampAt,
-  strokeSegment,
   toBase64,
-  toImageData,
   type RasterBuffer,
 } from "../../components/image-canvas/raster-buffer";
 import { useImageSize } from "../useImageSize";
-
-type QueueItem = QueueResponse["items"][number];
-type ReadyState = { project: ProjectDetail; queue: QueueResponse };
-type PageState =
-  | { kind: "loading" }
-  | ({ kind: "ready" } & ReadyState)
-  | { kind: "error"; message: string };
+import { QueueFallback, itemText, summaryStrings, useTaskQueue } from "../useTaskQueue";
 
 const HANDLE_SCREEN_SIZE = 8;
 const MIN_RADIUS = 1;
 const MAX_RADIUS = 100;
 
 type Tool = "brush" | "erase" | "polygon";
-
-function itemText(item: QueueItem, key: string): string {
-  const value = item[key];
-  return value == null ? "" : String(value);
-}
-
-function configuredCategories(project: ProjectDetail): string[] {
-  const value = project.summary.categories;
-  return Array.isArray(value)
-    ? value.filter((category): category is string => typeof category === "string")
-    : [];
-}
 
 function categoryIndex(categories: readonly string[], category: string): number {
   const index = categories.indexOf(category);
@@ -88,54 +61,31 @@ function colorFor(index: number): readonly [number, number, number, number] {
 
 export function SegmentationReviewPage() {
   const { projectId = "" } = useParams();
-  const [state, setState] = useState<PageState>({ kind: "loading" });
   const [tool, setTool] = useState<Tool>("brush");
   const [radius, setRadius] = useState(12);
   const [category, setCategory] = useState("");
   const [raster, setRaster] = useState<RasterBuffer | null>(null);
   const [polygonTool, setPolygonTool] = useState<PolygonToolState>(createPolygonToolState());
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState("");
   const viewportRef = useRef<Viewport>({ scale: 1, offset: { x: 0, y: 0 } });
-  const painting = useRef(false);
-  const lastPoint = useRef<{ x: number; y: number } | null>(null);
+  const paint = useRasterBrush(setRaster);
 
-  const load = useCallback(async () => {
-    setState({ kind: "loading" });
-    setSubmitError("");
-    try {
-      const [project, queue] = await Promise.all([
-        getProject(projectId),
-        getQueue(projectId),
-      ]);
-      if (project.task_type !== "segmentation") {
-        setState({ kind: "error", message: "该项目不是图像分割任务。" });
-        return;
-      }
-      const categories = configuredCategories(project);
-      setCategory(categories[0] ?? "");
-      setPolygonTool(createPolygonToolState([], categories[0] ?? ""));
+  const queue = useTaskQueue(projectId, {
+    taskType: "segmentation",
+    wrongType: "该项目不是图像分割任务。",
+    onLoad: (project) => {
+      const first = summaryStrings(project, "categories")[0] ?? "";
+      setCategory(first);
+      setPolygonTool(createPolygonToolState([], first));
       setRaster(null);
-      setState({ kind: "ready", project, queue });
-    } catch (error) {
-      setState({
-        kind: "error",
-        message: error instanceof Error ? error.message : "未知错误",
-      });
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const item = state.kind === "ready" ? state.queue.items[0] : undefined;
+    },
+  });
+  const { ready, item, submitting, submitError } = queue;
   const imagePath = item ? itemText(item, "image_path") : undefined;
   const imageUrl = imagePath ? projectFileUrl(projectId, imagePath) : undefined;
   const imageSize = useImageSize(imageUrl);
   const categories = useMemo(
-    () => (state.kind === "ready" ? configuredCategories(state.project) : []),
-    [state],
+    () => (ready ? summaryStrings(ready.project, "categories") : []),
+    [ready],
   );
 
   useEffect(() => {
@@ -151,13 +101,7 @@ export function SegmentationReviewPage() {
       id: "segmentation-mask",
       render(context, frame) {
         if (!raster) return;
-        const offscreen = document.createElement("canvas");
-        offscreen.width = raster.width;
-        offscreen.height = raster.height;
-        const offscreenContext = offscreen.getContext("2d");
-        if (!offscreenContext) return;
-        offscreenContext.putImageData(toImageData(raster, colorFor), 0, 0);
-        context.drawImage(offscreen, 0, 0);
+        drawRaster(context, raster, colorFor);
 
         const scale = frame.viewport.scale;
         for (const polygon of polygonTool.polygons) {
@@ -177,68 +121,47 @@ export function SegmentationReviewPage() {
     [categories, raster, polygonTool],
   );
 
+  /**
+   * Apply a polygon-tool transition; when it closed a polygon, fill that
+   * polygon into the mask with its category.
+   */
+  function updatePolygons(change: (current: PolygonToolState) => PolygonToolState) {
+    setPolygonTool((current) => {
+      const next = change(current);
+      if (next.polygons.length > current.polygons.length) {
+        const finished = next.polygons[next.polygons.length - 1];
+        setRaster(
+          (buffer) =>
+            buffer && {
+              ...fillPolygon(buffer, finished.points, categoryIndex(categories, finished.category)),
+            },
+        );
+      }
+      return next;
+    });
+  }
+
   function handlePointer(event: ImageCanvasPointerEvent) {
     if (!raster) return;
     if (tool === "polygon") {
       if (event.phase === "down") {
         const closeDistance = HANDLE_SCREEN_SIZE / viewportRef.current.scale;
-        setPolygonTool((current) => {
-          const next = beginOrExtendDraft(current, event.image, closeDistance);
-          const closed = next.polygons.length > current.polygons.length;
-          if (closed) {
-            const finished = next.polygons[next.polygons.length - 1];
-            setRaster((buffer) => {
-              if (!buffer) return buffer;
-              fillPolygon(buffer, finished.points, categoryIndex(categories, finished.category));
-              return { ...buffer };
-            });
-          }
-          return next;
-        });
+        updatePolygons((current) => beginOrExtendDraft(current, event.image, closeDistance));
       }
       return;
     }
-    if (event.phase === "down") {
-      painting.current = true;
-      lastPoint.current = event.image;
-      setRaster((buffer) => {
-        if (!buffer) return buffer;
-        stampAt(buffer, event.image, radius, () => activeIndex);
-        return { ...buffer };
-      });
-    } else if (event.phase === "move" && painting.current && lastPoint.current) {
-      const from = lastPoint.current;
-      lastPoint.current = event.image;
-      setRaster((buffer) => {
-        if (!buffer) return buffer;
-        strokeSegment(buffer, from, event.image, radius, () => activeIndex);
-        return { ...buffer };
-      });
-    } else if (event.phase === "up" || event.phase === "cancel") {
-      painting.current = false;
-      lastPoint.current = null;
-    }
+    paint(event, radius, () => activeIndex);
   }
 
   async function submit() {
-    if (!item || !raster || submitting) return;
-    setSubmitting(true);
-    setSubmitError("");
-    try {
-      await submitAnnotation(projectId, itemText(item, "item_id"), {
-        image_size: { width: raster.width, height: raster.height },
-        pixels: toBase64(raster),
-      });
-      const queue = await getQueue(projectId);
-      setState((current) =>
-        current.kind === "ready" ? { ...current, queue } : current,
-      );
+    if (!item || !raster) return;
+    const saved = await queue.submit(itemText(item, "item_id"), {
+      image_size: { width: raster.width, height: raster.height },
+      pixels: toBase64(raster),
+    });
+    if (saved) {
       setRaster(null);
       setPolygonTool(createPolygonToolState([], category));
-    } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "未知错误");
-    } finally {
-      setSubmitting(false);
     }
   }
 
@@ -251,19 +174,7 @@ export function SegmentationReviewPage() {
   }
 
   function closePolygon() {
-    setPolygonTool((current) => {
-      const next = closeDraft(current);
-      const closed = next.polygons.length > current.polygons.length;
-      if (closed) {
-        const finished = next.polygons[next.polygons.length - 1];
-        setRaster((buffer) => {
-          if (!buffer) return buffer;
-          fillPolygon(buffer, finished.points, categoryIndex(categories, finished.category));
-          return { ...buffer };
-        });
-      }
-      return next;
-    });
+    updatePolygons(closeDraft);
   }
 
   const resize = (delta: number) =>
@@ -307,16 +218,14 @@ export function SegmentationReviewPage() {
   ];
   useHotkeys(hotkeys, Boolean(item));
 
-  if (state.kind === "loading") return <LoadingState>正在读取分割队列…</LoadingState>;
-  if (state.kind === "error") {
-    return <ErrorState message={state.message} onRetry={() => void load()} />;
-  }
-  if (!item) {
+  if (!ready || !item) {
     return (
-      <CompleteState
-        description="当前没有待分割图像，所有结果均已原子写入本地掩膜文件。"
+      <QueueFallback
+        doneDescription="当前没有待分割图像，所有结果均已原子写入本地掩膜文件。"
+        doneTitle="图像分割已完成"
+        loading="正在读取分割队列…"
         projectId={projectId}
-        title="图像分割已完成"
+        queue={queue}
       />
     );
   }
@@ -377,10 +286,10 @@ export function SegmentationReviewPage() {
           </PanelSection>
         </>
       }
-      progress={summaryProgress(state.project.summary, state.queue.total)}
+      progress={summaryProgress(ready.project.summary, ready.queue.total)}
       projectId={projectId}
-      projectName={state.project.name}
-      remaining={state.queue.total}
+      projectName={ready.project.name}
+      remaining={ready.queue.total}
       stage={
         imageSize && imageUrl && raster ? (
           <ImageCanvas
