@@ -38,8 +38,10 @@ flowchart LR
 
 > 以上六种任务类型均已端到端验证（单元测试 + 一次真实浏览器交互，见
 > [`docs/detailed_design/00_概述.md`](docs/detailed_design/00_概述.md) §16.1）。
-> 文本标注的范围仍在 [#20](https://github.com/seagochen/annotation-toolkits/issues/20)
-> 中讨论，尚未实现。
+> 文本标注范围已在 [#20](https://github.com/seagochen/annotation-toolkits/issues/20)
+> 中决定（文档级分类/自由文本生成复用现有模块，span/区间标注新增独立模块），
+> 实现跟踪见 [#39](https://github.com/seagochen/annotation-toolkits/issues/39)、
+> [#40](https://github.com/seagochen/annotation-toolkits/issues/40)，尚未落地。
 
 ## 运行要件
 
