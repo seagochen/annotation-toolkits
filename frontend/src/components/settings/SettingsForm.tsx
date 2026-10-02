@@ -1,6 +1,5 @@
-import { useState, type KeyboardEvent } from "react";
-
 import type { FieldSpec, SettingsValues } from "../../api/client";
+import { ListEditor } from "./ListEditor";
 import "./settings.css";
 
 const COLLAPSED_GROUPS = new Set(["高级"]);
@@ -32,67 +31,6 @@ export function missingRequired(fields: readonly FieldSpec[], values: SettingsVa
     .map((field) => field.label);
 }
 
-function ListInput({
-  id,
-  value,
-  fixed,
-  disabled,
-  onChange,
-}: {
-  id: string;
-  value: string[];
-  /** Entries that may not be removed (append-only once annotated). */
-  fixed: number;
-  disabled: boolean;
-  onChange: (next: string[]) => void;
-}) {
-  const [draft, setDraft] = useState("");
-
-  function add() {
-    const entries = draft
-      .split(/[,，\n]/)
-      .map((entry) => entry.trim())
-      .filter((entry) => entry && !value.includes(entry));
-    if (entries.length) onChange([...value, ...new Set(entries)]);
-    setDraft("");
-  }
-
-  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Enter" || event.key === ",") {
-      event.preventDefault();
-      add();
-    } else if (event.key === "Backspace" && !draft && value.length > fixed) {
-      onChange(value.slice(0, -1));
-    }
-  }
-
-  return (
-    <div className={disabled ? "list-input disabled" : "list-input"}>
-      {value.map((entry, index) => (
-        <span className="list-chip" key={entry}>
-          <span aria-hidden="true" className="list-chip-index">{index + 1}</span>
-          <span>{entry}</span>
-          {index >= fixed && !disabled && (
-            <button aria-label={`移除 ${entry}`} onClick={() => onChange(value.filter((item) => item !== entry))} type="button">
-              ×
-            </button>
-          )}
-        </span>
-      ))}
-      {!disabled && (
-        <input
-          id={id}
-          onBlur={add}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={value.length ? "继续添加…" : "输入后按 Enter 添加"}
-          value={draft}
-        />
-      )}
-    </div>
-  );
-}
-
 function FieldInput({
   field,
   value,
@@ -112,7 +50,7 @@ function FieldInput({
   let control;
   if (field.type === "list") {
     control = (
-      <ListInput
+      <ListEditor
         disabled={locked}
         fixed={annotated && field.lock === "append_only" ? asList(initial).length : 0}
         id={id}

@@ -709,7 +709,7 @@ describe("project pages", () => {
     const labels = screen.getByLabelText(/^标签/);
     fireEvent.change(labels, { target: { value: "indoor, outdoor" } });
     fireEvent.keyDown(labels, { key: "Enter" });
-    expect(screen.getByRole("button", { name: "移除 indoor" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "删除 indoor" })).toBeVisible();
     fireEvent.click(create);
 
     expect(await screen.findByRole("heading", { name: "Street" })).toBeVisible();
@@ -723,6 +723,51 @@ describe("project pages", () => {
     expect(screen.getByRole("link", { name: /导入数据/ })).toHaveClass("primary");
   });
 
+  it("edits the category list with confirm, reorder, rename and delete", async () => {
+    fetchMock
+      .mockResolvedValueOnce(response([classificationType]))
+      .mockResolvedValueOnce(response({ ...streetProject, status: "empty", summary: {} }, 201))
+      .mockResolvedValueOnce(response({ ...streetProject, status: "empty", summary: {} }));
+    renderAt("/new/classification");
+
+    const input = await screen.findByLabelText(/^标签/);
+    const confirm = screen.getByRole("button", { name: "确认" });
+    fireEvent.change(screen.getByLabelText(/^项目名称/), { target: { value: "Street" } });
+    for (const name of ["ゴミ範囲", "灰の範囲", "背景"]) {
+      fireEvent.change(input, { target: { value: name } });
+      fireEvent.click(confirm);
+    }
+    fireEvent.change(input, { target: { value: "背景" } });
+    fireEvent.click(confirm);
+    expect(screen.getByRole("alert")).toHaveTextContent("已存在");
+    fireEvent.change(input, { target: { value: "" } });
+
+    // Move 背景 to the front with the keyboard, then delete 灰の範囲.
+    const handle = screen.getByRole("button", { name: /调整 背景 的顺序/ });
+    fireEvent.keyDown(handle, { key: "ArrowUp" });
+    fireEvent.keyDown(screen.getByRole("button", { name: /调整 背景 的顺序/ }), { key: "ArrowUp" });
+    fireEvent.click(screen.getByRole("button", { name: "删除 灰の範囲" }));
+
+    // Rename ゴミ範囲; a name that already exists is refused.
+    fireEvent.click(screen.getByRole("button", { name: "修改 ゴミ範囲" }));
+    const edit = screen.getByRole("textbox", { name: "修改 ゴミ範囲 的名称" });
+    fireEvent.change(edit, { target: { value: "背景" } });
+    fireEvent.keyDown(edit, { key: "Enter" });
+    expect(screen.getByRole("alert")).toHaveTextContent("已存在");
+    fireEvent.change(edit, { target: { value: "ゴミ" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+
+    const entries = within(screen.getByRole("list", { name: "已添加" })).getAllByRole("listitem");
+    expect(entries.map((entry) => entry.textContent)).toEqual(["1.背景", "2.ゴミ"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    expect(await screen.findByRole("heading", { name: "Street" })).toBeVisible();
+    const request = fetchMock.mock.calls[1][0] as Request;
+    await expect(request.clone().json()).resolves.toMatchObject({
+      settings: { labels: ["背景", "ゴミ"] },
+    });
+  });
+
   it("keeps existing labels fixed once a project has annotations", async () => {
     fetchMock
       .mockResolvedValueOnce(response(streetProject))
@@ -734,12 +779,12 @@ describe("project pages", () => {
     renderAt("/projects/street/settings");
 
     expect(await screen.findByText("indoor")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "移除 indoor" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "删除 indoor" })).toBeNull();
     expect(screen.getByLabelText(/^选择方式/)).toBeDisabled();
     const labels = screen.getByLabelText(/^标签/);
     fireEvent.change(labels, { target: { value: "night" } });
     fireEvent.keyDown(labels, { key: "Enter" });
-    expect(screen.getByRole("button", { name: "移除 night" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "删除 night" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "保存属性" }));
 
     expect(await screen.findByText("已保存。")).toBeVisible();
