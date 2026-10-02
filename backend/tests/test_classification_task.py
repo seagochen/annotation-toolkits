@@ -46,7 +46,7 @@ def test_single_label_queue_submission_reload_and_exports(tmp_path):
     # A fresh module reads the same local document after a page/process reload.
     reloaded = ClassificationTaskType()
     reopened = reloaded.load(tmp_path / "classification.yaml")
-    labelled = reloaded.queue(reopened, QueueRequest(filters={"status": "labelled"}))
+    labelled = reloaded.queue(reopened, QueueRequest(filters={"status": "annotated"}))
     assert labelled.items[0]["labels"] == ["cat"]
     document = tmp_path / "images" / ".annotations" / "classification.json"
     state = json.loads(document.read_text(encoding="utf-8"))

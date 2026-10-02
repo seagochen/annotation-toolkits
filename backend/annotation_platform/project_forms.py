@@ -17,11 +17,7 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Literal, Mapping
 
-from .caption_task import DEFAULT_PATTERNS as CAPTION_PATTERNS
-from .classification_task import DEFAULT_PATTERNS as CLASSIFICATION_PATTERNS
-from .depth_task import DEFAULT_PATTERNS as DEPTH_PATTERNS
-from .detection_task import DEFAULT_PATTERNS as DETECTION_PATTERNS
-from .segmentation_task import DEFAULT_PATTERNS as SEGMENTATION_PATTERNS
+from .image_dataset import DEFAULT_PATTERNS
 
 FieldType = Literal["text", "path", "integer", "number", "boolean", "select", "list"]
 LockRule = Literal["none", "append_only", "locked"]
@@ -149,7 +145,7 @@ TASK_TYPE_SPECS: tuple[TaskTypeSpec, ...] = (
                 help="开始标注后不可再修改。",
                 lock="locked",
             ),
-            _patterns(CLASSIFICATION_PATTERNS),
+            _patterns(DEFAULT_PATTERNS),
         ),
     ),
     TaskTypeSpec(
@@ -158,7 +154,7 @@ TASK_TYPE_SPECS: tuple[TaskTypeSpec, ...] = (
         description="为每张图片撰写一段自由文本描述。",
         import_modes=("upload", "directory"),
         export_formats=(NATIVE, ExportFormat("csv", "CSV")),
-        fields=(_patterns(CAPTION_PATTERNS),),
+        fields=(_patterns(DEFAULT_PATTERNS),),
     ),
     TaskTypeSpec(
         type="detection",
@@ -175,7 +171,7 @@ TASK_TYPE_SPECS: tuple[TaskTypeSpec, ...] = (
                 help="目标类别列表，顺序决定 COCO 导出的 category_id。开始标注后只能在末尾追加。",
                 lock="append_only",
             ),
-            _patterns(DETECTION_PATTERNS),
+            _patterns(DEFAULT_PATTERNS),
         ),
     ),
     TaskTypeSpec(
@@ -194,7 +190,7 @@ TASK_TYPE_SPECS: tuple[TaskTypeSpec, ...] = (
                 "开始标注后只能在末尾追加。",
                 lock="append_only",
             ),
-            _patterns(SEGMENTATION_PATTERNS),
+            _patterns(DEFAULT_PATTERNS),
         ),
     ),
     TaskTypeSpec(
@@ -212,7 +208,7 @@ TASK_TYPE_SPECS: tuple[TaskTypeSpec, ...] = (
                 help="相对数据集根目录；图片 a/b.jpg 的基线深度图应位于 <该目录>/a/b.png。"
                 "没有基线时从空白开始绘制。",
             ),
-            _patterns(DEPTH_PATTERNS),
+            _patterns(DEFAULT_PATTERNS),
         ),
     ),
     TaskTypeSpec(

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import local_files
-from annotation_platform.classification_task import file_lock as platform_lock
+from annotation_platform.image_dataset import file_lock as platform_lock
 from reid_annotation_tool import app as app_module
 from reid_annotation_tool import core
 from reid_annotation_tool.jobs import JobRunner

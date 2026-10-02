@@ -54,7 +54,7 @@ def test_queue_submission_reload_and_mask_export(tmp_path):
 
     reloaded = SegmentationTaskType()
     reopened = reloaded.load(tmp_path / "segmentation.yaml")
-    segmented = reloaded.queue(reopened, QueueRequest(filters={"status": "segmented"}))
+    segmented = reloaded.queue(reopened, QueueRequest(filters={"status": "annotated"}))
     assert segmented.items[0]["mask_path"] == f"{item_id}.png"
 
     index_path = tmp_path / "images" / ".annotations" / "segmentation" / "index.json"

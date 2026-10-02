@@ -13,6 +13,10 @@ from reid_annotation_tool.review_store import LabelConflictError, Store
 from reid_annotation_tool.stages import BOOLEAN_OPTIONS, PLATFORM_ACTIONS
 
 from .task_types import (
+    STATUS_EMPTY,
+    STATUS_MISSING,
+    STATUS_REVIEWED,
+    STATUS_REVIEWING,
     ActionRecord,
     ActionRequest,
     ExportRequest,
@@ -27,6 +31,8 @@ from .task_types import (
     TaskStatus,
 )
 
+# ReID-only state: a dataset exists but `mine` has not produced a round yet.
+STATUS_NEEDS_MINING = "needs_mining"
 
 
 class ReIDTaskType:
@@ -120,13 +126,13 @@ class ReIDTaskType:
     def status(self, project: TaskProject) -> TaskStatus:
         summary = self._project(project).summary()
         if not summary["exists"]:
-            state = "missing"
+            state = STATUS_MISSING
         elif not summary["identities"]:
-            state = "empty"
+            state = STATUS_EMPTY
         elif not summary["live_round"]:
-            state = "needs_mining"
+            state = STATUS_NEEDS_MINING
         else:
-            state = "reviewing" if summary["pending"] else "reviewed"
+            state = STATUS_REVIEWING if summary["pending"] else STATUS_REVIEWED
         return TaskStatus(state=state, details=summary)
 
     def export(self, project: TaskProject, request: ExportRequest) -> ExportResult:

@@ -62,7 +62,7 @@ def test_submission_reload_and_native_export(tmp_path):
 
     reloaded = DepthTaskType()
     reopened = reloaded.load(tmp_path / "depth.yaml")
-    edited = reloaded.queue(reopened, QueueRequest(filters={"status": "edited"}))
+    edited = reloaded.queue(reopened, QueueRequest(filters={"status": "annotated"}))
     assert edited.items[0]["depth_path"] == f"{item_id}.png"
 
     index_path = tmp_path / "images" / ".annotations" / "depth" / "index.json"

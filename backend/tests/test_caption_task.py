@@ -40,7 +40,7 @@ def test_queue_submission_reload_and_exports(tmp_path):
 
     reloaded = CaptionTaskType()
     reopened = reloaded.load(tmp_path / "caption.yaml")
-    captioned = reloaded.queue(reopened, QueueRequest(filters={"status": "captioned"}))
+    captioned = reloaded.queue(reopened, QueueRequest(filters={"status": "annotated"}))
     assert captioned.items[0]["caption"] == "一只猫在窗边。\n睡觉。"
     document = tmp_path / "images" / ".annotations" / "caption.json"
     state = json.loads(document.read_text(encoding="utf-8"))

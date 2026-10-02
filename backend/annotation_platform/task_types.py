@@ -98,6 +98,15 @@ class SubmissionResult:
     status: "TaskStatus"
 
 
+# Project states shared by every task type (the frontend's statusLabels
+# translates the same words); a task may add its own, as ReID adds
+# STATUS_NEEDS_MINING.
+STATUS_MISSING = "missing"
+STATUS_EMPTY = "empty"
+STATUS_REVIEWING = "reviewing"
+STATUS_REVIEWED = "reviewed"
+
+
 @dataclass(frozen=True)
 class TaskStatus:
     state: str
