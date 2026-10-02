@@ -87,6 +87,20 @@ pip install -e 'backend[extract,ultralytics]'
 ReID 的数据约束、流水线接入和完整操作说明见 [`backend/README.md`](backend/README.md)；
 前端的完整开发、类型生成与验证命令见 [`frontend/README.md`](frontend/README.md)。
 
+### Docker 部署（GPU）
+
+镜像同时包含前端构建产物与后端，单端口 `3000` 提供页面和 API；运行时带 CUDA 12.6 +
+cuDNN 9，供 ReID 抽取/候选挖掘使用 GPU（需要宿主机安装 NVIDIA Container Toolkit）。
+
+```bash
+# <dir> 下需要有 projects.yaml；配置里引用的绝对路径目录用 --mount 原样挂载
+python3 docker/build_and_run.py --data <dir> [--mount /abs/dataset/path ...]
+```
+
+浏览器访问 `http://<host>:3000`。平台没有登录，默认在所有网卡上开放；只在本机使用时
+加 `--bind 127.0.0.1`。挂载、权限与 GPU 检查见
+[`90_部署与运维.md`](docs/detailed_design/90_部署与运维.md) §3。
+
 ## 文档
 
 | 文档 | 内容 |
@@ -116,6 +130,9 @@ frontend/
     ├── components/image-canvas/   # 共享画布图元（检测/分割/深度复用）
     ├── pages/                     # 项目列表/详情、画布 demo
     └── tasks/<type>/              # 各任务类型的标注页面
+
+Dockerfile                # 前端构建 + CUDA 运行时的多阶段镜像
+docker/                   # 容器入口脚本与 build_and_run.py
 
 docs/requirements/        # 需求与验收标准
 docs/overall_design/      # 总体架构与跨系统约束

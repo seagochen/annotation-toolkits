@@ -206,6 +206,51 @@ def test_cors_allows_only_configured_local_origin(tmp_path):
     assert "access-control-allow-origin" not in denied.headers
 
 
+def make_frontend_dist(tmp_path: Path) -> Path:
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<div id=root></div>", encoding="utf-8")
+    (dist / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("outside", encoding="utf-8")
+    return dist
+
+
+def test_frontend_build_is_served_next_to_the_api(tmp_path):
+    app = create_app(make_registry(tmp_path), frontend_dist=make_frontend_dist(tmp_path))
+
+    assert request(app, "GET", "/").text == "<div id=root></div>"
+    asset = request(app, "GET", "/assets/app.js")
+    assert asset.status_code == 200
+    assert asset.text == "console.log(1)"
+    # Client-side routes fall back to index.html so a reload does not 404.
+    route = request(app, "GET", "/projects/lobby/detect")
+    assert route.status_code == 200
+    assert route.text == "<div id=root></div>"
+    assert route.headers["cache-control"] == "no-cache"
+    assert request(app, "GET", "/assets/stale-hash.js").status_code == 404
+
+    assert request(app, "GET", "/api/projects").json()[0]["id"] == "lobby"
+    assert request(app, "GET", "/docs").status_code == 200
+    unknown_api = request(app, "GET", "/api/nope")
+    assert unknown_api.status_code == 404
+    assert unknown_api.json()["detail"]["code"] == "not_found"
+
+    escaped = request(app, "GET", "/..%2Fsecret.txt")
+    assert "outside" not in escaped.text
+
+    schema = request(app, "GET", "/openapi.json").json()
+    assert all(path.startswith("/api/") for path in schema["paths"])
+
+
+def test_frontend_is_not_served_unless_configured(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANNOTATION_FRONTEND_DIST", raising=False)
+    registry = make_registry(tmp_path)
+    assert request(create_app(registry), "GET", "/").status_code == 404
+
+    with pytest.raises(ValueError, match="frontend build not found"):
+        create_app(registry, frontend_dist=tmp_path / "missing")
+
+
 def test_wildcard_cors_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="must be explicit"):
         create_app(make_registry(tmp_path), cors_origins=["*"])

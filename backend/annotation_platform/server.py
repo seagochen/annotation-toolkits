@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from reid_annotation_tool.project_registry import ProjectRegistry, RegistryError
@@ -123,8 +123,13 @@ def create_app(
     registry_path: str | Path | None = None,
     cors_origins: list[str] | tuple[str, ...] | None = None,
     task_types: TaskTypeRegistry | None = None,
+    frontend_dist: str | Path | None = None,
 ) -> FastAPI:
-    """Build the API without loading project data until a request needs it."""
+    """Build the API without loading project data until a request needs it.
+
+    ``frontend_dist`` (or ``ANNOTATION_FRONTEND_DIST``) points at a Vite build;
+    when set, the same process serves the web UI so one port carries both.
+    """
     origins = list(cors_origins) if cors_origins is not None else _configured_origins()
     if "*" in origins:
         raise ValueError("CORS origins must be explicit; wildcard '*' is not allowed")
@@ -329,7 +334,42 @@ def create_app(
         media_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
         return Response(content=content, media_type=media_type)
 
+    dist = frontend_dist if frontend_dist is not None else os.environ.get("ANNOTATION_FRONTEND_DIST")
+    if dist:
+        _mount_frontend(application, Path(dist))
+
     return application
+
+
+def _mount_frontend(application: FastAPI, dist: Path) -> None:
+    """Serve the built SPA after every API route, so it can never shadow one."""
+    root = dist.resolve()
+    index = root / "index.html"
+    if not index.is_file():
+        raise ValueError(f"frontend build not found: {index}")
+
+    @application.get("/{asset_path:path}", include_in_schema=False)
+    async def frontend(asset_path: str) -> Response:
+        # An unknown /api path is a client bug, not a page: keep the JSON 404
+        # instead of answering with index.html and a misleading 200.
+        if asset_path == "api" or asset_path.startswith("api/"):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "API endpoint not found"},
+            )
+        candidate = (root / asset_path).resolve()
+        if root in candidate.parents and candidate.is_file():
+            return FileResponse(candidate)
+        # A stale tab asking for a bundle hash from before a redeploy must get
+        # a 404, not index.html served as JavaScript.
+        if asset_path.startswith("assets/"):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "asset not found"},
+            )
+        # Client-side routes (/projects/x/detect) all render from index.html;
+        # it must not be cached, or a redeploy keeps loading stale bundles.
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
 def _project_entry(registry: ProjectRegistry, project_id: str):
