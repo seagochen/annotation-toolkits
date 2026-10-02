@@ -657,7 +657,8 @@ projects:
 注册表路径按 `projects.yaml` 所在目录解析。Python 层的 `ProjectRegistry.load()` 也可以
 传入一个目录，将其中每个 `*.yaml`/`*.yml` 视为单独的项目条目（HTTP 服务不使用这种
 形式：它把目录当作工作区，读写其中的 `projects.yaml`）。Python 层使用
-`ProjectRegistry.load(path).list_projects()` 和 `load_project(id)`；HTTP 接口的项目
+`annotation_platform.project_registry.ProjectRegistry.load(path)` 的 `list_projects()` 与
+`get_entry(id)`；HTTP 接口的项目
 列表、创建、属性修改、导入、导出与删除见
 `docs/detailed_design/70_外部接口.md`。完整示例见 `configs/projects.example.yaml`。
 

@@ -14,13 +14,12 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from reid_annotation_tool.project_registry import (
-    ProjectRegistry,
-    RegisteredProject,
-    RegistryError,
-)
-
 from .project_forms import ManagementError, describe_spec, task_type_spec
+from .project_registry import (
+    ProjectRegistry,
+    ProjectRegistryError,
+    RegisteredProject,
+)
 from .task_types import (
     ActionRecord,
     ActionRequest,
@@ -202,7 +201,7 @@ def _configured_origins() -> list[str]:
 async def _registry(request: Request) -> ProjectRegistry:
     try:
         return request.app.state.workspace.load_registry()
-    except RegistryError as error:
+    except ProjectRegistryError as error:
         raise HTTPException(
             status_code=500,
             detail={"code": "registry_invalid", "message": str(error)},
@@ -670,7 +669,7 @@ def _raise_management_error(error: ManagementError) -> NoReturn:
 def _project_entry(registry: ProjectRegistry, project_id: str):
     try:
         return registry.get_entry(project_id)
-    except RegistryError as error:
+    except ProjectRegistryError as error:
         raise HTTPException(
             status_code=404,
             detail={"code": "project_not_found", "message": str(error)},

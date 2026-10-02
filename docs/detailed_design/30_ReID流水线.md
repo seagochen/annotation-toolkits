@@ -22,7 +22,6 @@
 | [`registry.py`](../../backend/reid_annotation_tool/registry.py) | 命名的 PyTorch checkpoint 注册表 |
 | [`handoff.py`](../../backend/reid_annotation_tool/handoff.py) | 把定版数据集交给外部训练脚本，记录交接内容 |
 | [`jobs.py`](../../backend/reid_annotation_tool/jobs.py) | 后台任务执行器：一次一个，包装 `app.py` 的阶段函数 |
-| [`project_registry.py`](../../backend/reid_annotation_tool/project_registry.py) | 多项目注册表（被 [`20_标注平台后端.md`](20_标注平台后端.md) 复用） |
 | [`pipelines/`](../../backend/reid_annotation_tool/pipelines/) | 参考流水线脚本（`tracking_csv.py`、`ultralytics.py`），仅供复制，不是自动默认 |
 
 **运行进程**：CLI 直接调用时是前台脚本；作为平台的 `reid` 任务类型使用时，重量级

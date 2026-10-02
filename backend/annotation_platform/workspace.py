@@ -32,12 +32,6 @@ from typing import AsyncIterator, Iterable, Mapping
 import yaml
 
 from reid_annotation_tool.config import ConfigError as ReIDConfigError
-from reid_annotation_tool.project_registry import (
-    PROJECT_ID,
-    ProjectRegistry,
-    RegisteredProject,
-    RegistryError,
-)
 
 from .local_files import atomic_write_bytes, file_lock
 from .project_forms import (
@@ -53,6 +47,12 @@ from .project_forms import (
     initial_values,
     set_dotted,
     task_type_spec,
+)
+from .project_registry import (
+    PROJECT_ID,
+    ProjectRegistry,
+    ProjectRegistryError,
+    RegisteredProject,
 )
 from .task_types import (
     ExportRequest,
@@ -224,13 +224,13 @@ class Workspace:
     def _registry(self) -> ProjectRegistry:
         try:
             return self.load_registry()
-        except RegistryError as error:
+        except ProjectRegistryError as error:
             raise ManagementError("registry_invalid", str(error), status=500) from error
 
     def _entry(self, project_id: str) -> RegisteredProject:
         try:
             return self._registry().get_entry(project_id)
-        except RegistryError as error:
+        except ProjectRegistryError as error:
             raise ManagementError("project_not_found", str(error), status=404) from error
 
     def managed_dir(self, project_id: str) -> Path:
@@ -481,7 +481,7 @@ class Workspace:
             registry = self._registry()
             try:
                 entry = registry.get_entry(project_id)
-            except RegistryError as error:
+            except ProjectRegistryError as error:
                 raise ManagementError("project_not_found", str(error), status=404) from error
             spec = task_type_spec(entry.task_type)
             if spec is None or "directory" not in spec.import_modes:
