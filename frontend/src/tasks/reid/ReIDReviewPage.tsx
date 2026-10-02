@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "wouter";
+import { useParams } from "wouter";
 
 import {
   getProject,
@@ -10,6 +10,9 @@ import {
   type QueueResponse,
 } from "../../api/client";
 import { ErrorState, LoadingState } from "../../components/AsyncState";
+import { CompleteState, PanelSection, TaskWorkspace } from "../../components/workspace/TaskWorkspace";
+import { useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
+import { summaryProgress } from "../../project-meta";
 
 type Verdict = "same" | "different" | "unclear";
 type QueueItem = QueueResponse["items"][number];
@@ -134,16 +137,15 @@ export function ReIDReviewPage() {
     [item, notes, projectId, submitting],
   );
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.matches("input, textarea, select") || submitting) return;
-      const verdict = verdicts.find((choice) => choice.key === event.key)?.value;
-      if (verdict) void submit(verdict);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [submit, submitting]);
+  const hotkeys: Hotkey[] = verdicts.map((choice) => ({
+    keys: [choice.key],
+    display: choice.key,
+    description: choice.label,
+    run: () => {
+      if (!submitting) void submit(choice.value);
+    },
+  }));
+  useHotkeys(hotkeys, Boolean(item));
 
   if (state.kind === "loading") return <LoadingState>正在读取审核队列…</LoadingState>;
   if (state.kind === "error") {
@@ -151,79 +153,79 @@ export function ReIDReviewPage() {
   }
   if (!item) {
     return (
-      <section className="state-panel review-complete">
-        <p className="eyebrow">Queue complete</p>
-        <h1>候选队列已完成</h1>
-        <p>当前没有待审核的候选。所有判定均已写入本地 CSV。</p>
-        <Link className="text-link" to={`/projects/${projectId}`}>
-          返回项目详情
-        </Link>
-      </section>
+      <CompleteState
+        description="当前没有待审核的候选。所有判定均已写入本地 CSV。"
+        projectId={projectId}
+        title="候选队列已完成"
+      />
     );
   }
 
   return (
-    <section className="review-workspace">
-      <div className="review-topbar">
-        <div>
-          <Link className="back-link" to={`/projects/${projectId}`}>
-            ← {state.project.name}
-          </Link>
-          <p className="eyebrow">ReID pair review</p>
-          <h1>这两段轨迹属于同一人吗？</h1>
-        </div>
-        <div className="queue-count">
-          <strong>{state.queue.total}</strong>
-          <span>条待审核</span>
-        </div>
-      </div>
-
-      <div className="comparison-grid">
-        <IdentityGallery item={item} projectId={projectId} side={1} />
-        <IdentityGallery item={item} projectId={projectId} side={2} />
-      </div>
-
-      <div className="review-controls">
-        <label htmlFor="review-notes">备注（可选）</label>
-        <textarea
-          disabled={submitting !== null}
-          id="review-notes"
-          onChange={(event) => setNotes(event.target.value)}
-          placeholder="记录遮挡、服装或时序等判断依据"
-          rows={2}
-          value={notes}
-        />
-        <div className="verdict-grid">
-          {verdicts.map((choice) => (
-            <button
-              className={`verdict verdict-${choice.value}`}
-              disabled={submitting !== null}
-              key={choice.value}
-              onClick={() => void submit(choice.value)}
-              type="button"
-            >
-              <kbd>{choice.key}</kbd>
-              <span>{submitting === choice.value ? "正在保存…" : choice.label}</span>
-              <small>{choice.hint}</small>
-            </button>
-          ))}
-        </div>
-        {submitFailure && (
-          <div className="submit-error" role="alert">
-            <span>保存失败：{submitFailure.message}</span>
-            <div>
+    <TaskWorkspace
+      footer={
+        <>
+          <div className="verdict-grid">
+            {verdicts.map((choice) => (
               <button
+                className={`verdict verdict-${choice.value}`}
                 disabled={submitting !== null}
-                onClick={() => void submit(submitFailure.verdict)}
+                key={choice.value}
+                onClick={() => void submit(choice.value)}
                 type="button"
               >
-                重试保存
+                <kbd>{choice.key}</kbd>
+                <span>{submitting === choice.value ? "正在保存…" : choice.label}</span>
+                <small>{choice.hint}</small>
               </button>
-              <button onClick={() => void load()} type="button">刷新队列</button>
-            </div>
+            ))}
           </div>
-        )}
-      </div>
-    </section>
+          {submitFailure && (
+            <div className="submit-error" role="alert">
+              <span>保存失败：{submitFailure.message}</span>
+              <div>
+                <button
+                  disabled={submitting !== null}
+                  onClick={() => void submit(submitFailure.verdict)}
+                  type="button"
+                >
+                  重试保存
+                </button>
+                <button onClick={() => void load()} type="button">刷新队列</button>
+              </div>
+            </div>
+          )}
+        </>
+      }
+      hotkeys={hotkeys}
+      panel={
+        <PanelSection title="判定">
+          <p className="panel-note">两段轨迹是否属于同一人？对比服装、体型与时序后作答。</p>
+          <div className="review-controls">
+            <label htmlFor="review-notes">备注（可选）</label>
+            <textarea
+              disabled={submitting !== null}
+              id="review-notes"
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="记录遮挡、服装或时序等判断依据"
+              rows={4}
+              value={notes}
+            />
+          </div>
+        </PanelSection>
+      }
+      progress={summaryProgress(state.project.summary, state.queue.total)}
+      projectId={projectId}
+      projectName={state.project.name}
+      remaining={state.queue.total}
+      stage={
+        <div className="comparison-grid">
+          <IdentityGallery item={item} projectId={projectId} side={1} />
+          <IdentityGallery item={item} projectId={projectId} side={2} />
+        </div>
+      }
+      title="ReID 成对审核"
+      unit="条"
+    />
   );
 }

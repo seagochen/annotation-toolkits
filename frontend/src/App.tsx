@@ -1,4 +1,4 @@
-import { Link, Route, Switch } from "wouter";
+import { Link, Route, Switch, useRoute } from "wouter";
 
 import { CanvasDemoPage } from "./pages/CanvasDemoPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
@@ -23,6 +23,9 @@ function NotFoundPage() {
 }
 
 export function App() {
+  // Task pages (/projects/:id/<task>) are full-viewport tools; everything
+  // else is a centred document page.
+  const [isTaskPage] = useRoute("/projects/:projectId/:task");
   return (
     <div className="app-shell">
       <header className="site-header">
@@ -30,15 +33,11 @@ export function App() {
           <span className="brand-mark">AT</span>
           <span>
             <strong>Annotation Toolkits</strong>
-            <small>Local annotation workspace</small>
+            <small>本地标注工作台</small>
           </span>
         </Link>
-        <nav className="site-nav" aria-label="主导航">
-          <Link className="text-link" to="/canvas-demo">画布 Demo</Link>
-          <span className="local-badge">本地模式</span>
-        </nav>
       </header>
-      <main>
+      <main className={isTaskPage ? "main-wide" : undefined}>
         <Switch>
           <Route path="/" component={ProjectListPage} />
           <Route path="/canvas-demo" component={CanvasDemoPage} />

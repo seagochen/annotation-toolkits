@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "wouter";
+import { useParams } from "wouter";
 
 import {
   getProject,
@@ -10,6 +10,14 @@ import {
   type QueueResponse,
 } from "../../api/client";
 import { ErrorState, LoadingState } from "../../components/AsyncState";
+import {
+  CompleteState,
+  PanelSection,
+  SubmitBar,
+  TaskWorkspace,
+} from "../../components/workspace/TaskWorkspace";
+import { MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
+import { summaryProgress } from "../../project-meta";
 
 type QueueItem = QueueResponse["items"][number];
 type ReadyState = { project: ProjectDetail; queue: QueueResponse };
@@ -81,69 +89,72 @@ export function CaptionReviewPage() {
     }
   }
 
+  const hotkeys: Hotkey[] = [
+    {
+      keys: SAVE_KEYS,
+      display: `${MOD_LABEL} + Enter`,
+      description: "保存并继续（输入时也可用）",
+      allowInText: true,
+      run: () => void submit(),
+    },
+  ];
+  useHotkeys(hotkeys, Boolean(item));
+
   if (state.kind === "loading") return <LoadingState>正在读取描述队列…</LoadingState>;
   if (state.kind === "error") {
     return <ErrorState message={state.message} onRetry={() => void load()} />;
   }
   if (!item) {
     return (
-      <section className="state-panel review-complete">
-        <p className="eyebrow">Queue complete</p>
-        <h1>图像描述已完成</h1>
-        <p>当前没有待描述图像，所有结果均已原子写入本地 JSON。</p>
-        <Link className="text-link" to={`/projects/${projectId}`}>返回项目详情</Link>
-      </section>
+      <CompleteState
+        description="当前没有待描述图像，所有结果均已原子写入本地 JSON。"
+        projectId={projectId}
+        title="图像描述已完成"
+      />
     );
   }
 
   const imagePath = itemText(item, "image_path");
   return (
-    <section className="classification-workspace">
-      <div className="review-topbar">
-        <div>
-          <Link className="back-link" to={`/projects/${projectId}`}>← {state.project.name}</Link>
-          <p className="eyebrow">Image captioning</p>
-          <h1>为这张图像撰写描述</h1>
-        </div>
-        <div className="queue-count">
-          <strong>{state.queue.total}</strong>
-          <span>张待描述</span>
-        </div>
-      </div>
-
-      <div className="classification-grid">
-        <figure className="classification-image">
-          <img alt={imagePath} src={projectFileUrl(projectId, imagePath)} />
-          <figcaption>{imagePath}</figcaption>
-        </figure>
-        <div className="label-selector">
-          <h2>描述文本</h2>
+    <TaskWorkspace
+      fileName={imagePath}
+      footer={
+        <SubmitBar
+          disabled={!trimmed}
+          error={submitError}
+          hint="先输入描述文本"
+          onSubmit={() => void submit()}
+          submitting={submitting}
+        />
+      }
+      hotkeys={hotkeys}
+      panel={
+        <PanelSection title="描述文本">
           <textarea
             aria-label="图像描述"
+            autoFocus
+            className="panel-textarea"
             disabled={submitting}
+            key={itemText(item, "item_id")}
             maxLength={MAX_CAPTION_LENGTH}
             onChange={(event) => setCaption(event.target.value)}
             placeholder="描述这张图像的内容…"
-            rows={6}
+            rows={8}
             value={caption}
           />
-          <p className="caption-length">{trimmed.length} / {MAX_CAPTION_LENGTH}</p>
-          <button
-            className="classification-submit"
-            disabled={!trimmed || submitting}
-            onClick={() => void submit()}
-            type="button"
-          >
-            {submitting ? "正在保存…" : "保存并继续"}
-          </button>
-          {submitError && (
-            <div className="submit-error" role="alert">
-              <span>保存失败：{submitError}</span>
-              <button onClick={() => void submit()} type="button">重试保存</button>
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
+          <p className="char-count">{trimmed.length} / {MAX_CAPTION_LENGTH}</p>
+        </PanelSection>
+      }
+      progress={summaryProgress(state.project.summary, state.queue.total)}
+      projectId={projectId}
+      projectName={state.project.name}
+      remaining={state.queue.total}
+      stage={
+        <figure className="stage-image">
+          <img alt={imagePath} src={projectFileUrl(projectId, imagePath)} />
+        </figure>
+      }
+      title="图像描述"
+    />
   );
 }

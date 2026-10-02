@@ -3,6 +3,7 @@ import { Link, useParams } from "wouter";
 
 import { ApiError, getProject, type ProjectDetail } from "../api/client";
 import { ErrorState, LoadingState } from "../components/AsyncState";
+import { statusLabels, summaryProgress, taskEntries, taskLabel } from "../project-meta";
 import { ReIDActions } from "../tasks/reid/ReIDActions";
 
 type LoadState =
@@ -10,6 +11,46 @@ type LoadState =
   | { kind: "ready"; project: ProjectDetail }
   | { kind: "missing" }
   | { kind: "error"; message: string };
+
+const summaryLabels: Record<string, string> = {
+  config: "配置文件",
+  dataset: "数据目录",
+  annotations: "标注结果",
+  depth_maps: "基线深度图",
+  categories: "类别",
+  labels: "标签",
+  mode: "模式",
+  total: "图像总数",
+  annotated: "已标注",
+  labelled: "已标注",
+  captioned: "已描述",
+  segmented: "已分割",
+  edited: "已编辑",
+  pending: "待处理",
+  exists: "数据存在",
+  identities: "身份数",
+  tracks: "轨迹数",
+  pairs: "候选对",
+  rounds: "审核轮次",
+  live_round: "当前轮次",
+};
+
+function SummaryValue({ value }: { value: unknown }) {
+  if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) {
+    if (value.length === 0) return <span className="project-id">—</span>;
+    return (
+      <span className="tag-list">
+        {value.map((entry) => (
+          <span className="tag" key={entry}>{entry}</span>
+        ))}
+      </span>
+    );
+  }
+  if (typeof value === "boolean") return <>{value ? "是" : "否"}</>;
+  if (typeof value === "string" && value.startsWith("/")) return <span className="path">{value}</span>;
+  if (value === "" || value == null) return <span className="project-id">—</span>;
+  return <>{typeof value === "object" ? JSON.stringify(value) : String(value)}</>;
+}
 
 export function ProjectDetailPage() {
   const { projectId = "" } = useParams();
@@ -53,6 +94,9 @@ export function ProjectDetailPage() {
   }
 
   const { project } = state;
+  const entry = taskEntries[project.task_type];
+  const progress = summaryProgress(project.summary);
+  const percent = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
   return (
     <>
       <Link className="back-link" to="/">
@@ -60,64 +104,57 @@ export function ProjectDetailPage() {
       </Link>
       <section className="detail-heading">
         <div>
-          <p className="eyebrow">{project.task_type}</p>
-          <h1>{project.name}</h1>
+          <p className="eyebrow">{taskLabel(project.task_type)}</p>
+          <div className="detail-title-row">
+            <h1>{project.name}</h1>
+            <span className={`status status-${project.status}`} title={project.status}>
+              {statusLabels[project.status] ?? project.status}
+            </span>
+          </div>
           <p className="project-id">{project.id}</p>
+          <p className="path">{project.root}</p>
         </div>
-        <span className={`status status-${project.status}`}>{project.status}</span>
+        {entry && project.status === "reviewing" && (
+          <Link className="primary-link" to={`/projects/${project.id}/${entry.path}`}>
+            {entry.action} →
+          </Link>
+        )}
       </section>
-      {project.task_type === "reid" && project.status === "reviewing" && (
-        <Link className="primary-link" to={`/projects/${project.id}/review`}>
-          开始审核候选 →
-        </Link>
+      {progress && (
+        <section className="detail-card detail-progress" aria-label="标注进度">
+          <div className="detail-progress-numbers">
+            <span>
+              已完成 <strong>{progress.done}</strong> / {progress.total}
+            </span>
+            <span>{percent}%</span>
+          </div>
+          <div
+            aria-valuemax={progress.total}
+            aria-valuemin={0}
+            aria-valuenow={progress.done}
+            className="progress-track"
+            role="progressbar"
+          >
+            <span style={{ width: `${percent}%` }} />
+          </div>
+        </section>
       )}
-      {project.task_type === "classification" && project.status === "reviewing" && (
-        <Link className="primary-link" to={`/projects/${project.id}/classify`}>
-          开始图像分类 →
-        </Link>
-      )}
-      {project.task_type === "captioning" && project.status === "reviewing" && (
-        <Link className="primary-link" to={`/projects/${project.id}/caption`}>
-          开始图像描述 →
-        </Link>
-      )}
-      {project.task_type === "detection" && project.status === "reviewing" && (
-        <Link className="primary-link" to={`/projects/${project.id}/detect`}>
-          开始目标检测 →
-        </Link>
-      )}
-      {project.task_type === "segmentation" && project.status === "reviewing" && (
-        <Link className="primary-link" to={`/projects/${project.id}/segment`}>
-          开始图像分割 →
-        </Link>
-      )}
-      {project.task_type === "depth" && project.status === "reviewing" && (
-        <Link className="primary-link" to={`/projects/${project.id}/depth`}>
-          开始深度图标注 →
-        </Link>
-      )}
-      <section className="detail-grid">
-        <article className="detail-card">
-          <h2>本地数据</h2>
-          <dl>
-            <dt>数据目录</dt>
-            <dd className="path">{project.root}</dd>
-            <dt>当前状态</dt>
-            <dd>{project.status}</dd>
-          </dl>
-        </article>
-        <article className="detail-card">
-          <h2>任务摘要</h2>
-          <dl>
-            {Object.entries(project.summary).map(([key, value]) => (
-              <div className="summary-row" key={key}>
-                <dt>{key}</dt>
-                <dd>{typeof value === "object" ? JSON.stringify(value) : String(value)}</dd>
-              </div>
-            ))}
-          </dl>
-        </article>
-      </section>
+      <article className="detail-card">
+        <h2>任务摘要</h2>
+        <dl>
+          {Object.entries(project.summary).map(([key, value]) => (
+            <div className="summary-row" key={key}>
+              <dt>
+                {summaryLabels[key] ?? null}
+                <code>{key}</code>
+              </dt>
+              <dd>
+                <SummaryValue value={value} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </article>
       {project.task_type === "reid" && <ReIDActions projectId={project.id} />}
     </>
   );

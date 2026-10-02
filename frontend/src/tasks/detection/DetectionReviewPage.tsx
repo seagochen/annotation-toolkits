@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "wouter";
+import { useParams } from "wouter";
 
 import {
   getProject,
@@ -10,6 +10,17 @@ import {
   type QueueResponse,
 } from "../../api/client";
 import { ErrorState, LoadingState } from "../../components/AsyncState";
+import {
+  CANVAS_HINTS,
+  CompleteState,
+  OptionList,
+  PanelSection,
+  SubmitBar,
+  TaskWorkspace,
+} from "../../components/workspace/TaskWorkspace";
+import { categoryColor } from "../../components/workspace/palette";
+import { DIGIT_KEYS, MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
+import { summaryProgress } from "../../project-meta";
 import { useImageSize } from "../useImageSize";
 import {
   ImageCanvas,
@@ -97,23 +108,39 @@ export function DetectionReviewPage() {
   const imagePath = item ? itemText(item, "image_path") : undefined;
   const imageUrl = imagePath ? projectFileUrl(projectId, imagePath) : undefined;
   const imageSize = useImageSize(imageUrl);
-  const categories = state.kind === "ready" ? configuredCategories(state.project) : [];
+  const categories = useMemo(
+    () => (state.kind === "ready" ? configuredCategories(state.project) : []),
+    [state],
+  );
 
   const layer: ImageCanvasLayer = useMemo(
     () => ({
       id: "boxes",
       render(context, frame) {
         const scale = frame.viewport.scale;
+        const fontSize = 12 / scale;
+        context.font = `600 ${fontSize}px sans-serif`;
         for (const box of tool.boxes) {
           const selected = box.id === tool.selectedId;
+          const color = categoryColor(categories.indexOf(box.category));
           context.lineWidth = (selected ? 3 : 2) / scale;
-          context.strokeStyle = selected ? "#ff8a3d" : "#39c37a";
+          context.strokeStyle = color;
+          if (selected) {
+            context.fillStyle = `${color}22`;
+            context.fillRect(box.x, box.y, box.width, box.height);
+          }
           context.strokeRect(box.x, box.y, box.width, box.height);
-          context.font = `${12 / scale}px sans-serif`;
-          context.fillStyle = selected ? "#ff8a3d" : "#39c37a";
-          context.fillText(box.category, box.x + 2 / scale, box.y - 4 / scale);
+          // Label tag above the box (inside it when the box touches the top).
+          const tagWidth = context.measureText(box.category).width + 8 / scale;
+          const tagHeight = fontSize + 6 / scale;
+          const tagY = box.y - tagHeight >= 0 ? box.y - tagHeight : box.y;
+          context.fillStyle = color;
+          context.fillRect(box.x, tagY, tagWidth, tagHeight);
+          context.fillStyle = "#ffffff";
+          context.fillText(box.category, box.x + 4 / scale, tagY + fontSize + 1 / scale);
           if (selected) {
             const handleSize = HANDLE_SCREEN_SIZE / scale;
+            context.lineWidth = 1.5 / scale;
             for (const [hx, hy] of [
               [box.x, box.y],
               [box.x + box.width / 2, box.y],
@@ -124,7 +151,9 @@ export function DetectionReviewPage() {
               [box.x, box.y + box.height],
               [box.x, box.y + box.height / 2],
             ]) {
+              context.fillStyle = "#ffffff";
               context.fillRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
+              context.strokeRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
             }
           }
         }
@@ -133,14 +162,14 @@ export function DetectionReviewPage() {
           if (preview) {
             context.setLineDash([6 / scale, 4 / scale]);
             context.lineWidth = 2 / scale;
-            context.strokeStyle = "#ff8a3d";
+            context.strokeStyle = categoryColor(categories.indexOf(category));
             context.strokeRect(preview.x, preview.y, preview.width, preview.height);
             context.setLineDash([]);
           }
         }
       },
     }),
-    [mode, previewPoint, tool],
+    [categories, category, mode, previewPoint, tool],
   );
 
   function handlePointer(event: ImageCanvasPointerEvent) {
@@ -195,119 +224,186 @@ export function DetectionReviewPage() {
     }
   }
 
+  function chooseCategory(next: string) {
+    setCurrentCategory(next);
+    // With a box selected, picking a category relabels that box.
+    setTool((current) =>
+      current.selectedId ? setCategory(current, current.selectedId, next) : current,
+    );
+  }
+
+  function toggleDraw() {
+    setMode((current) => (current === "draw" ? "select" : "draw"));
+    setTool((current) => ({ ...current, selectedId: null }));
+  }
+
+  function deleteSelected() {
+    setTool((current) => (current.selectedId ? deleteBox(current, current.selectedId) : current));
+  }
+
+  const hotkeys: Hotkey[] = [
+    {
+      keys: DIGIT_KEYS,
+      display: "1–9",
+      description: "选择类别（选中框时改为该类别）",
+      run: (key) => {
+        const next = categories[Number(key) - 1];
+        if (next) chooseCategory(next);
+      },
+    },
+    {
+      keys: ["b"],
+      display: "B",
+      description: "绘制新框 / 取消绘制",
+      run: toggleDraw,
+    },
+    {
+      keys: ["delete", "backspace"],
+      display: "Del",
+      description: "删除选中的框",
+      run: deleteSelected,
+    },
+    {
+      keys: ["escape"],
+      display: "Esc",
+      description: "取消绘制 / 取消选中",
+      run: () => {
+        setPreviewPoint(null);
+        setMode("select");
+        setTool((current) => ({ ...current, selectedId: null, drag: null }));
+      },
+    },
+    {
+      keys: SAVE_KEYS,
+      display: `${MOD_LABEL} + Enter`,
+      description: "保存并继续",
+      run: () => void submit(),
+    },
+  ];
+  useHotkeys(hotkeys, Boolean(item));
+
   if (state.kind === "loading") return <LoadingState>正在读取检测队列…</LoadingState>;
   if (state.kind === "error") {
     return <ErrorState message={state.message} onRetry={() => void load()} />;
   }
   if (!item) {
     return (
-      <section className="state-panel review-complete">
-        <p className="eyebrow">Queue complete</p>
-        <h1>目标检测已完成</h1>
-        <p>当前没有待标注图像，所有结果均已原子写入本地 JSON。</p>
-        <Link className="text-link" to={`/projects/${projectId}`}>返回项目详情</Link>
-      </section>
+      <CompleteState
+        description="当前没有待标注图像，所有结果均已原子写入本地 JSON。"
+        projectId={projectId}
+        title="目标检测已完成"
+      />
     );
   }
 
-  return (
-    <section className="classification-workspace">
-      <div className="review-topbar">
-        <div>
-          <Link className="back-link" to={`/projects/${projectId}`}>← {state.project.name}</Link>
-          <p className="eyebrow">Object detection</p>
-          <h1>为这张图像标注检测框</h1>
-        </div>
-        <div className="queue-count">
-          <strong>{state.queue.total}</strong>
-          <span>张待标注</span>
-        </div>
-      </div>
+  const counts: Record<string, number> = {};
+  for (const box of tool.boxes) counts[box.category] = (counts[box.category] ?? 0) + 1;
+  const selectedBox = tool.boxes.find((box) => box.id === tool.selectedId);
 
-      <div className="classification-grid">
-        <div className="detection-canvas">
-          {imageSize && imageUrl ? (
-            <ImageCanvas
-              alt={imagePath ?? ""}
-              imageSize={imageSize}
-              interactionMode="tool"
-              layers={[layer]}
-              onPointerEvent={handlePointer}
-              onViewportChange={(next) => {
-                viewportRef.current = next;
-              }}
-              shortcuts={[
-                {
-                  key: "delete",
-                  description: "删除选中的框",
-                  onTrigger: () =>
-                    setTool((current) =>
-                      current.selectedId ? deleteBox(current, current.selectedId) : current,
-                    ),
-                },
-                {
-                  key: "backspace",
-                  description: "删除选中的框",
-                  onTrigger: () =>
-                    setTool((current) =>
-                      current.selectedId ? deleteBox(current, current.selectedId) : current,
-                    ),
-                },
-              ]}
-              src={imageUrl}
+  return (
+    <TaskWorkspace
+      fileName={imagePath}
+      footer={
+        <SubmitBar
+          disabled={!imageSize}
+          error={submitError}
+          onSubmit={() => void submit()}
+          submitting={submitting}
+        />
+      }
+      hints={CANVAS_HINTS}
+      hotkeys={hotkeys}
+      panel={
+        <>
+          <PanelSection title="类别">
+            <OptionList
+              counts={counts}
+              label="检测类别"
+              name="detection-category"
+              onToggle={chooseCategory}
+              options={categories}
+              selected={selectedBox ? [selectedBox.category] : [category]}
+              swatches
             />
-          ) : (
-            <LoadingState>正在读取图像尺寸…</LoadingState>
-          )}
-        </div>
-        <div className="label-selector">
-          <h2>检测类别</h2>
-          <div role="group" aria-label="检测类别">
-            {categories.map((option) => (
-              <label className={option === category ? "selected" : ""} key={option}>
-                <input
-                  checked={option === category}
-                  name="detection-category"
-                  onChange={() => setCurrentCategory(option)}
-                  type="radio"
-                />
-                <span>{option}</span>
-              </label>
-            ))}
-          </div>
-          <button
-            aria-pressed={mode === "draw"}
-            className="classification-submit"
-            onClick={() => setMode(mode === "draw" ? "select" : "draw")}
-            type="button"
-          >
-            {mode === "draw" ? "取消绘制" : "绘制新框"}
-          </button>
-          {tool.selectedId && (
+            {selectedBox && <p className="panel-note">已选中一个框：选择类别会修改它的类别。</p>}
+          </PanelSection>
+          <PanelSection title="工具">
             <button
-              onClick={() => setTool((current) => deleteBox(current, current.selectedId!))}
+              aria-pressed={mode === "draw"}
+              className="secondary-action"
+              onClick={toggleDraw}
               type="button"
             >
-              删除选中的框
+              {mode === "draw" ? "取消绘制" : "绘制新框"} <kbd aria-hidden="true">B</kbd>
             </button>
-          )}
-          <p>已标注 {tool.boxes.length} 个框</p>
-          <button
-            className="classification-submit"
-            disabled={submitting || !imageSize}
-            onClick={() => void submit()}
-            type="button"
-          >
-            {submitting ? "正在保存…" : "保存并继续"}
-          </button>
-          {submitError && (
-            <div className="submit-error" role="alert">
-              <span>保存失败：{submitError}</span>
-              <button onClick={() => void submit()} type="button">重试保存</button>
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
+            <p className="panel-note">
+              {mode === "draw"
+                ? `在图像上拖动，绘制一个「${category}」框。`
+                : "点击框选中，拖动移动，拖动控制点调整大小。"}
+            </p>
+          </PanelSection>
+          <PanelSection title="标注框" aside={<span className="project-id">{tool.boxes.length} 个</span>}>
+            {tool.boxes.length === 0 ? (
+              <p className="empty-note">还没有框。没有目标时可直接保存。</p>
+            ) : (
+              <ul className="item-list">
+                {tool.boxes.map((box, index) => (
+                  <li key={box.id}>
+                    <button
+                      aria-pressed={box.id === tool.selectedId}
+                      className="item-select"
+                      onClick={() => setTool((current) => ({ ...current, selectedId: box.id }))}
+                      type="button"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="option-swatch"
+                        style={{ background: categoryColor(categories.indexOf(box.category)) }}
+                      />
+                      <span>
+                        #{index + 1} {box.category}
+                      </span>
+                      <span className="item-meta">
+                        {Math.round(box.width)}×{Math.round(box.height)}
+                      </span>
+                    </button>
+                    <button
+                      aria-label={`删除框 #${index + 1}`}
+                      className="icon-button"
+                      onClick={() => setTool((current) => deleteBox(current, box.id))}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </PanelSection>
+        </>
+      }
+      progress={summaryProgress(state.project.summary, state.queue.total)}
+      projectId={projectId}
+      projectName={state.project.name}
+      remaining={state.queue.total}
+      stage={
+        imageSize && imageUrl ? (
+          <ImageCanvas
+            alt={imagePath ?? ""}
+            imageSize={imageSize}
+            interactionMode="tool"
+            layers={[layer]}
+            onPointerEvent={handlePointer}
+            onViewportChange={(next) => {
+              viewportRef.current = next;
+            }}
+            src={imageUrl}
+          />
+        ) : (
+          <LoadingState>正在读取图像尺寸…</LoadingState>
+        )
+      }
+      title="目标检测"
+    />
   );
 }

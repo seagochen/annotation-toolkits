@@ -128,6 +128,7 @@ frontend/
 └── src/
     ├── api/                       # 生成的 OpenAPI 类型 + 手写 client
     ├── components/image-canvas/   # 共享画布图元（检测/分割/深度复用）
+    ├── components/workspace/      # 标注工作台布局、快捷键、类别配色
     ├── pages/                     # 项目列表/详情、画布 demo
     └── tasks/<type>/              # 各任务类型的标注页面
 

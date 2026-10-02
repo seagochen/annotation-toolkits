@@ -3,19 +3,12 @@ import { Link } from "wouter";
 
 import { listProjects, type ProjectListItem } from "../api/client";
 import { ErrorState, LoadingState } from "../components/AsyncState";
+import { statusLabels, taskLabel } from "../project-meta";
 
 type LoadState =
   | { kind: "loading" }
   | { kind: "ready"; projects: ProjectListItem[] }
   | { kind: "error"; message: string };
-
-const statusLabels: Record<string, string> = {
-  missing: "数据缺失",
-  empty: "等待数据",
-  needs_mining: "等待候选挖掘",
-  reviewing: "标注中",
-  reviewed: "已完成",
-};
 
 export function ProjectListPage() {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
@@ -41,7 +34,7 @@ export function ProjectListPage() {
       <section className="hero">
         <p className="eyebrow">Projects</p>
         <h1>选择一个标注项目</h1>
-        <p>项目、任务配置和标注结果都保留在你的本地文件系统中。</p>
+        <p>项目、任务配置和标注结果都保存在本地文件系统中。</p>
       </section>
 
       {state.kind === "loading" && <LoadingState />}
@@ -58,7 +51,7 @@ export function ProjectListPage() {
           {state.projects.map((project) => (
             <Link className="project-card" to={`/projects/${project.id}`} key={project.id}>
               <div className="card-topline">
-                <span className="task-chip">{project.task_type}</span>
+                <span className="task-chip" title={project.task_type}>{taskLabel(project.task_type)}</span>
                 <span className={`status status-${project.status}`}>
                   {statusLabels[project.status] ?? project.status}
                 </span>

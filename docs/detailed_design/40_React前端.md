@@ -7,13 +7,16 @@
 | [`App.tsx`](../../frontend/src/App.tsx) | `wouter` 路由表：项目列表/详情 + 各任务标注页面的固定路径 |
 | [`api/client.ts`](../../frontend/src/api/client.ts) | 基于生成的 OpenAPI 类型（`api/schema.d.ts`）的类型安全 API 客户端 |
 | [`components/image-canvas/`](../../frontend/src/components/image-canvas/) | 与具体任务无关的共享画布图元（§5） |
+| [`components/workspace/`](../../frontend/src/components/workspace/) | 全部任务页共用的工作台布局、页面级快捷键（`useHotkeys`）与类别配色（§6） |
 | [`components/AsyncState.tsx`](../../frontend/src/components/AsyncState.tsx) | 通用加载中/错误态展示组件 |
+| [`project-meta.ts`](../../frontend/src/project-meta.ts) | 状态/任务类型的中文名、任务入口路径、由 `summary` 计算进度 |
 | [`pages/`](../../frontend/src/pages/) | 项目列表、项目详情（按 `task_type` 分支渲染各任务的入口链接）、画布 demo |
 | [`tasks/<type>/`](../../frontend/src/tasks/) | 每种任务类型一个目录，一个 `*ReviewPage.tsx` |
 | [`tasks/useImageSize.ts`](../../frontend/src/tasks/useImageSize.ts) | 检测/分割/深度共用：提交前用一张隐藏 `Image` 预探测图片像素尺寸 |
 
-**运行进程**：浏览器；开发时由 Vite 提供，生产构建产物由任意静态文件服务器托管
-（本项目未内置生产部署脚本，见 [`90_部署与运维.md`](90_部署与运维.md)）。
+**运行进程**：浏览器；开发时由 Vite 提供，生产构建产物可由后端通过
+`ANNOTATION_FRONTEND_DIST` 同源托管（Docker 镜像即如此），也可由任意静态文件服务器
+托管，见 [`90_部署与运维.md`](90_部署与运维.md)。
 
 ## 1. 职责
 
@@ -27,8 +30,9 @@
 
 `App.tsx` 按固定路径把每种 `task_type` 映射到一个页面组件（`/projects/:id/classify`、
 `/caption`、`/detect`、`/segment`、`/depth`、`/review`）；`ProjectDetailPage.tsx`
-读到项目的 `task_type` 后渲染对应的入口链接。新增任务类型需要同时改这两处——没有
-从 `task_type` 到路由的自动派生。
+按 `project-meta.ts` 的 `taskEntries` 表渲染对应的入口链接。新增任务类型需要同时改
+`App.tsx` 与 `taskEntries` 两处——没有从 `task_type` 到路由的自动派生（见 #33）。
+`/projects/:id/<task>` 形式的路径由 `App.tsx` 切换为全宽布局（`main.main-wide`）。
 
 ## 3. 接口一览
 
@@ -77,3 +81,34 @@ flowchart LR
 深度任务额外需要 `loadFromImageElement` 从已获取的基线深度图水合初始像素缓冲区；
 该图片元素必须设置 `crossOrigin = "anonymous"`，否则前后端不同源时画布会被浏览器
 标记为"污染"、无法读取像素，见 [`10_通用设计.md`](10_通用设计.md) §3。
+
+## 6. 标注工作台（`components/workspace/`）
+
+六个任务页（含 ReID 审核）都渲染同一个 `TaskWorkspace`：
+
+| 区域 | 内容 |
+|---|---|
+| 顶栏 | 返回项目、任务名、当前文件名、进度条（`已完成 / 总数`）、剩余数（`.queue-count`） |
+| 舞台 | 画布或图片，高度为视口减去站点顶栏，页面本身不滚动 |
+| 侧栏 | 类别/工具等面板（`PanelSection`、`OptionList`、`Segmented`、`RangeField`），可折叠的快捷键列表；底部固定 `SubmitBar`（保存按钮、禁用原因、保存失败与重试） |
+
+进度由 `project-meta.ts` 的 `summaryProgress()` 计算：图像任务取 `summary.total`，
+ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`（队列在每次提交后
+刷新，`summary` 只在进入页面时读取一次）。
+
+**页面级快捷键**（`useHotkeys`）挂在 `window` 上，不要求画布聚焦；在文本输入框中
+不触发（`allowInText` 的绑定除外），聚焦按钮时不拦截 Enter/空格。`ImageCanvas` 自带的
+缩放/平移键（`+`/`-`/`0`/方向键/空格拖动）仍只在画布聚焦时生效。
+
+| 页面 | 快捷键 |
+|---|---|
+| 全部（ReID 除外） | `Ctrl/⌘ + Enter` 保存并继续（描述页在输入框内也可用） |
+| 分类 | `1`–`9` 选择/切换第 N 个标签 |
+| 检测 | `1`–`9` 选择类别（选中框时改为该类别）、`B` 绘制新框、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中 |
+| 分割 | `1`–`9` 选择类别、`B` 画笔、`E` 橡皮、`P` 多边形、`[`/`]` 画笔半径、`Enter` 闭合多边形、`Backspace` 撤销最后一点、`Esc` 放弃多边形 |
+| 深度 | `1` 提高、`2` 降低、`X` 切换方向、`[`/`]` 画笔半径 |
+| ReID | `1` 同一人、`2` 不同人、`3` 不确定（按下即提交） |
+
+**类别配色**：`palette.ts` 的 `categoryColor(index)` 按类别在项目配置中的顺序取色，
+检测框、分割掩膜与侧栏色块共用，保证画布与图例一致。分割掩膜值 `N` 对应第 `N` 个
+类别（`categoryColor(N - 1)`），`0` 为背景。

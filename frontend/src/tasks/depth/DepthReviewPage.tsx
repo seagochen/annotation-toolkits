@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "wouter";
+import { useParams } from "wouter";
 
 import {
   getProject,
@@ -10,6 +10,17 @@ import {
   type QueueResponse,
 } from "../../api/client";
 import { ErrorState, LoadingState } from "../../components/AsyncState";
+import {
+  CANVAS_HINTS,
+  CompleteState,
+  PanelSection,
+  RangeField,
+  Segmented,
+  SubmitBar,
+  TaskWorkspace,
+} from "../../components/workspace/TaskWorkspace";
+import { MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
+import { summaryProgress } from "../../project-meta";
 import {
   ImageCanvas,
   type ImageCanvasLayer,
@@ -35,6 +46,8 @@ type PageState =
   | { kind: "error"; message: string };
 
 const BLANK_DEPTH = 128;
+const MIN_RADIUS = 2;
+const MAX_RADIUS = 150;
 
 function itemText(item: QueueItem, key: string): string {
   const value = item[key];
@@ -178,102 +191,108 @@ export function DepthReviewPage() {
     }
   }
 
+  const resize = (delta: number) =>
+    setRadius((current) => Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, current + delta)));
+
+  const hotkeys: Hotkey[] = [
+    { keys: ["1"], display: "1", description: "提高深度", run: () => setDirection("raise") },
+    { keys: ["2"], display: "2", description: "降低深度", run: () => setDirection("lower") },
+    {
+      keys: ["x"],
+      display: "X",
+      description: "切换提高 / 降低",
+      run: () => setDirection((current) => (current === "raise" ? "lower" : "raise")),
+    },
+    { keys: ["["], display: "[", description: "缩小画笔", repeat: true, run: () => resize(-4) },
+    { keys: ["]"], display: "]", description: "放大画笔", repeat: true, run: () => resize(4) },
+    {
+      keys: SAVE_KEYS,
+      display: `${MOD_LABEL} + Enter`,
+      description: "保存并继续",
+      run: () => void submit(),
+    },
+  ];
+  useHotkeys(hotkeys, Boolean(item));
+
   if (state.kind === "loading") return <LoadingState>正在读取深度队列…</LoadingState>;
   if (state.kind === "error") {
     return <ErrorState message={state.message} onRetry={() => void load()} />;
   }
   if (!item) {
     return (
-      <section className="state-panel review-complete">
-        <p className="eyebrow">Queue complete</p>
-        <h1>深度图标注已完成</h1>
-        <p>当前没有待标注图像，所有结果均已原子写入本地灰度图。</p>
-        <Link className="text-link" to={`/projects/${projectId}`}>返回项目详情</Link>
-      </section>
+      <CompleteState
+        description="当前没有待标注图像，所有结果均已原子写入本地灰度图。"
+        projectId={projectId}
+        title="深度图标注已完成"
+      />
     );
   }
 
   return (
-    <section className="classification-workspace">
-      <div className="review-topbar">
-        <div>
-          <Link className="back-link" to={`/projects/${projectId}`}>← {state.project.name}</Link>
-          <p className="eyebrow">Depth-map brush</p>
-          <h1>用画笔修正这张图像的深度</h1>
-        </div>
-        <div className="queue-count">
-          <strong>{state.queue.total}</strong>
-          <span>张待标注</span>
-        </div>
-      </div>
-
-      <div className="classification-grid">
-        <div className="depth-canvas">
-          {imageSize && imageUrl && raster ? (
-            <ImageCanvas
-              alt={imagePath ?? ""}
-              imageSize={imageSize}
-              interactionMode="tool"
-              layers={[layer]}
-              onPointerEvent={handlePointer}
-              onViewportChange={(next) => {
-                viewportRef.current = next;
-              }}
-              src={imageUrl}
-            />
-          ) : (
-            <LoadingState>正在读取基线深度图…</LoadingState>
-          )}
-        </div>
-        <div className="label-selector">
-          <h2>画笔设置</h2>
+    <TaskWorkspace
+      fileName={imagePath}
+      footer={
+        <SubmitBar
+          disabled={!raster}
+          error={submitError}
+          onSubmit={() => void submit()}
+          submitting={submitting}
+        />
+      }
+      hints={CANVAS_HINTS}
+      hotkeys={hotkeys}
+      panel={
+        <>
           {!baselinePath && (
             <p className="submit-hint">未找到基线深度图，已从中灰度（128）开始编辑。</p>
           )}
-          <div role="group" aria-label="调整方向">
-            <button aria-pressed={direction === "raise"} onClick={() => setDirection("raise")} type="button">
-              提高深度
-            </button>
-            <button aria-pressed={direction === "lower"} onClick={() => setDirection("lower")} type="button">
-              降低深度
-            </button>
-          </div>
-          <label>
-            画笔半径
-            <input
-              max={150}
-              min={2}
-              onChange={(event) => setRadius(Number(event.target.value))}
-              type="range"
+          <PanelSection title="调整方向">
+            <Segmented
+              label="调整方向"
+              onChange={setDirection}
+              options={[
+                { value: "raise", label: "提高深度", key: "1" },
+                { value: "lower", label: "降低深度", key: "2" },
+              ]}
+              value={direction}
+            />
+          </PanelSection>
+          <PanelSection title="画笔">
+            <RangeField
+              label="画笔半径"
+              max={MAX_RADIUS}
+              min={MIN_RADIUS}
+              onChange={setRadius}
+              unit="px"
               value={radius}
             />
-          </label>
-          <label>
-            调整强度
-            <input
-              max={64}
-              min={1}
-              onChange={(event) => setStrength(Number(event.target.value))}
-              type="range"
-              value={strength}
-            />
-          </label>
-          <button
-            className="classification-submit"
-            disabled={submitting || !raster}
-            onClick={() => void submit()}
-            type="button"
-          >
-            {submitting ? "正在保存…" : "保存并继续"}
-          </button>
-          {submitError && (
-            <div className="submit-error" role="alert">
-              <span>保存失败：{submitError}</span>
-              <button onClick={() => void submit()} type="button">重试保存</button>
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
+            <RangeField label="调整强度" max={64} min={1} onChange={setStrength} value={strength} />
+            <p className="panel-note">深度图以正片叠底叠加在原图上：越暗表示数值越小。</p>
+          </PanelSection>
+        </>
+      }
+      progress={summaryProgress(state.project.summary, state.queue.total)}
+      projectId={projectId}
+      projectName={state.project.name}
+      remaining={state.queue.total}
+      stage={
+        imageSize && imageUrl && raster ? (
+          <ImageCanvas
+            alt={imagePath ?? ""}
+            imageSize={imageSize}
+            interactionMode="tool"
+            layers={[layer]}
+            onPointerEvent={handlePointer}
+            onViewportChange={(next) => {
+              viewportRef.current = next;
+            }}
+            src={imageUrl}
+          />
+        ) : (
+          <LoadingState>正在读取基线深度图…</LoadingState>
+        )
+      }
+      title="深度图标注"
+    />
   );
 }
