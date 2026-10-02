@@ -32,7 +32,7 @@ def _store_lock(path: Path) -> threading.RLock:
     with _STORE_LOCKS_GUARD:
         return _STORE_LOCKS.setdefault(key, threading.RLock())
 
-# Similarity columns the different mining generations wrote, most recent first.
+
 def spread(values: list, maximum: int) -> list:
     """Evenly sample a list so a gallery shows the whole track, not its start."""
     if len(values) <= maximum:

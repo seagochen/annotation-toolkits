@@ -3,7 +3,7 @@
 The registry owns only platform metadata and a reference to each project's
 ``reid.yaml``. Dataset paths and all task settings remain owned by that file,
 so there is one validation and relative-path implementation for both the CLI
-and the future HTTP service.
+and the HTTP platform (``annotation_platform``).
 """
 
 from __future__ import annotations

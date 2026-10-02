@@ -330,7 +330,7 @@ class SegmentationStore:
                 {
                     "image_id": image_id,
                     # Mask-referencing "compatible" segmentation, not full
-                    # RLE/polygon COCO -- see docs/segmentation.md.
+                    # RLE/polygon COCO -- see docs/detailed_design/70_外部接口.md (segmentation).
                     "segmentation_mask": saved["mask_path"],
                 }
             )

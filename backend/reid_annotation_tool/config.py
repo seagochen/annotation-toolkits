@@ -228,8 +228,7 @@ def dump(dataset: str, sections: dict) -> str:
 
     Not comment-preserving -- PyYAML round-trips drop hand-written comments,
     and every default fills in explicitly rather than staying implicit.
-    Saving from the web UI is an explicit, flagged trade-off (surfaced in the
-    UI); hand-edit the file directly when comments or brevity matter.
+    Hand-edit the file directly when comments or brevity matter.
     """
     return yaml.dump({"dataset": dataset, **sections}, allow_unicode=True, sort_keys=False)
 
