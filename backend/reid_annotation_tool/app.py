@@ -28,6 +28,7 @@ from pathlib import Path
 
 from . import config as project_config
 from .config import ConfigError, Project
+from .stages import STAGE_NAMES
 
 TEMPLATE = '''# ReID 标注工作台项目文件。相对路径都相对本文件所在目录。
 # 每个键的含义与默认值见 reid_annotation_tool/config.py 的 DEFAULTS。
@@ -61,15 +62,11 @@ mine:
 
 '''
 
-STAGES = ("status", "init", "extract", "mine", "check", "finalize",
-          "train", "evaluate", "purge-domain")
-
-
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(
         prog="reid-annotation", description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    value.add_argument("stage", nargs="?", default="status", choices=STAGES,
+    value.add_argument("stage", nargs="?", default="status", choices=STAGE_NAMES,
                        help="默认 status（显示项目现状）")
     value.add_argument("--config", type=Path, help="项目文件（默认向上查找 reid.yaml）")
     value.add_argument("--set", action="append", default=[], dest="overrides",

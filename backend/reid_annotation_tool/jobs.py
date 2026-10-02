@@ -27,13 +27,12 @@ from datetime import datetime
 from pathlib import Path
 
 from .core import atomic_write_json
+from .stages import JOB_STAGES
 
-# extract/mine/train are long-running or subprocess-blocking (see the stage
-# table in the project plan); check/finalize/purge-domain are fast but still
-# worth routing through here so the platform has one uniform "run a stage,
-# watch it finish" surface. `status` is cheap enough to remain project metadata;
-# `init` is never a job because registered projects already have configuration.
-JOB_STAGES = ("extract", "mine", "check", "finalize", "train", "evaluate", "purge-domain")
+# extract/mine/train are long-running or subprocess-blocking; check/finalize/
+# purge-domain are fast but still worth routing through here so the platform has
+# one uniform "run a stage, watch it finish" surface. Which stages qualify is the
+# `job` column of stages.STAGES.
 _EXECUTION_GATE = threading.Lock()
 
 

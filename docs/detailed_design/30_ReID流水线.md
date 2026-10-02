@@ -19,6 +19,7 @@
 | [`domain.py`](../../backend/reid_annotation_tool/domain.py) | 跨天/跨相机关系归档（同日同机位约束） |
 | [`registry.py`](../../backend/reid_annotation_tool/registry.py) | 命名的 PyTorch checkpoint 注册表 |
 | [`handoff.py`](../../backend/reid_annotation_tool/handoff.py) | 把定版数据集交给外部训练脚本，记录交接内容 |
+| [`stages.py`](../../backend/reid_annotation_tool/stages.py) | 阶段描述表 `STAGES`（阶段名、能否作为后台任务、是否作为平台动作、接受的布尔选项），CLI 子命令、`JOB_STAGES` 与平台动作都由它派生 |
 | [`jobs.py`](../../backend/reid_annotation_tool/jobs.py) | 后台任务执行器：一次一个，包装 `app.py` 的阶段函数 |
 | [`pipelines/`](../../backend/reid_annotation_tool/pipelines/) | 参考流水线脚本（`tracking_csv.py`、`ultralytics.py`），仅供复制，不是自动默认 |
 

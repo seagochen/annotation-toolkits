@@ -10,6 +10,7 @@ from reid_annotation_tool import config as reid_config
 from reid_annotation_tool.app import latest_pairs
 from reid_annotation_tool.jobs import Job, JobBusyError, JobRunner
 from reid_annotation_tool.review_store import LabelConflictError, Store
+from reid_annotation_tool.stages import BOOLEAN_OPTIONS, PLATFORM_ACTIONS
 
 from .task_types import (
     ActionRecord,
@@ -26,15 +27,6 @@ from .task_types import (
     TaskStatus,
 )
 
-REID_ACTIONS = ("extract", "mine", "check", "finalize", "purge-domain", "train")
-ACTION_OPTIONS = {
-    "extract": frozenset(),
-    "mine": frozenset(),
-    "check": frozenset({"strict", "json"}),
-    "finalize": frozenset(),
-    "purge-domain": frozenset({"apply"}),
-    "train": frozenset({"dry_run"}),
-}
 
 
 class ReIDTaskType:
@@ -153,7 +145,7 @@ class ReIDTaskType:
         )
 
     def action_names(self) -> tuple[str, ...]:
-        return REID_ACTIONS
+        return tuple(PLATFORM_ACTIONS)
 
     def _runner(self, project: TaskProject) -> JobRunner:
         root = project.root.resolve()
@@ -181,9 +173,9 @@ class ReIDTaskType:
     def start_action(
         self, project: TaskProject, request: ActionRequest
     ) -> ActionRecord:
-        if request.name not in ACTION_OPTIONS:
+        if request.name not in PLATFORM_ACTIONS:
             raise TaskOperationError(f"unknown reid action {request.name!r}")
-        unknown = sorted(set(request.options) - ACTION_OPTIONS[request.name])
+        unknown = sorted(set(request.options) - PLATFORM_ACTIONS[request.name])
         if unknown:
             raise TaskOperationError(
                 f"unsupported options for {request.name!r}: {unknown}"
@@ -191,11 +183,10 @@ class ReIDTaskType:
         for key, value in request.options.items():
             if not isinstance(value, bool):
                 raise TaskOperationError(f"action option {key!r} must be boolean")
+        # Stage functions may read any boolean option, as they would from the
+        # CLI; the ones this action does not accept stay False.
         args = SimpleNamespace(
-            dry_run=bool(request.options.get("dry_run", False)),
-            apply=bool(request.options.get("apply", False)),
-            strict=bool(request.options.get("strict", False)),
-            json=bool(request.options.get("json", False)),
+            **{name: bool(request.options.get(name, False)) for name in BOOLEAN_OPTIONS}
         )
         try:
             job = self._runner(project).start(
