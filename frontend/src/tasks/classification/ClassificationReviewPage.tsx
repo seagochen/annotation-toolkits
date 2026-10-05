@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useParams } from "wouter";
 
-import { projectFileUrl } from "../../api/client";
 import {
   OptionList,
   PanelSection,
@@ -10,6 +9,7 @@ import {
 } from "../../components/workspace/TaskWorkspace";
 import { DIGIT_KEYS, MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
 import { summaryProgress } from "../../project-meta";
+import { ItemStage, isTextItem } from "../ItemStage";
 import { QueueFallback, itemText, summaryStrings, useTaskQueue } from "../useTaskQueue";
 
 export function ClassificationReviewPage() {
@@ -17,7 +17,7 @@ export function ClassificationReviewPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const queue = useTaskQueue(projectId, {
     taskType: "classification",
-    wrongType: "该项目不是图像分类任务。",
+    wrongType: "该项目不是分类任务。",
     onLoad: () => setSelected([]),
   });
   const { ready, item, submitting, submitError } = queue;
@@ -61,8 +61,8 @@ export function ClassificationReviewPage() {
   if (!ready || !item) {
     return (
       <QueueFallback
-        doneDescription="当前没有待分类图像，所有结果均已原子写入本地 JSON。"
-        doneTitle="图像分类已完成"
+        doneDescription="当前没有待分类条目，所有结果均已原子写入本地 JSON。"
+        doneTitle="分类已完成"
         loading="正在读取分类队列…"
         projectId={projectId}
         queue={queue}
@@ -101,12 +101,9 @@ export function ClassificationReviewPage() {
       projectId={projectId}
       projectName={ready.project.name}
       remaining={ready.queue.total}
-      stage={
-        <figure className="stage-image">
-          <img alt={imagePath} src={projectFileUrl(projectId, imagePath)} />
-        </figure>
-      }
-      title="图像分类"
+      stage={<ItemStage item={item} projectId={projectId} />}
+      title={isTextItem(item) ? "文本分类" : "图像分类"}
+      unit={isTextItem(item) ? "篇" : "张"}
     />
   );
 }

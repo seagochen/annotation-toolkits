@@ -1,4 +1,5 @@
-"""Per-image free-text captioning task module."""
+"""Free-text captioning of images, or free-text generation (translation,
+summary) for text documents."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ from pathlib import Path
 
 from local_files import atomic_write_csv, atomic_write_json
 
+from .file_kinds import is_image_path
 from .image_dataset import (
     ImageTaskStore,
     ImageTaskType,
@@ -25,6 +27,8 @@ from .task_types import (
 
 CONFIG_KEYS = frozenset({"dataset", "patterns", "annotations"})
 MAX_CAPTION_LENGTH = 2000
+# Translating or summarizing a document can need far more than a caption.
+MAX_GENERATED_TEXT_LENGTH = 20000
 
 
 @dataclass(frozen=True)
@@ -43,14 +47,14 @@ def load_config(path: Path) -> CaptionProject:
     return CaptionProject(path.resolve(), dataset, patterns, annotations)
 
 
-def _normalize_caption(value: object) -> str:
+def _normalize_caption(value: object, limit: int = MAX_CAPTION_LENGTH) -> str:
     if not isinstance(value, str):
         raise TaskOperationError("caption result requires a text `caption`")
     normalized = value.replace("\r\n", "\n").replace("\r", "\n").strip()
     if not normalized:
         raise TaskOperationError("caption must not be empty or whitespace-only")
-    if len(normalized) > MAX_CAPTION_LENGTH:
-        raise TaskOperationError(f"caption exceeds {MAX_CAPTION_LENGTH} characters")
+    if len(normalized) > limit:
+        raise TaskOperationError(f"caption exceeds {limit} characters")
     return normalized
 
 
@@ -65,6 +69,7 @@ class CaptionStore(ImageTaskStore):
         return {
             "item_id": item_id,
             "image_path": image_path,
+            **self.media_fields(image_path),
             "caption": "" if saved is None else saved["caption"],
         }
 
@@ -72,8 +77,9 @@ class CaptionStore(ImageTaskStore):
         return {"annotations": str(self.project.annotations)}
 
     def submit(self, submission: Submission) -> dict:
-        caption = _normalize_caption(submission.result.get("caption"))
-        image_path = self.image_path(submission.item_id)
+        image_path = self.submittable_path(submission.item_id)
+        limit = MAX_CAPTION_LENGTH if is_image_path(image_path) else MAX_GENERATED_TEXT_LENGTH
+        caption = _normalize_caption(submission.result.get("caption"), limit)
         with self.lock:
             state = self._read()
             current = state["items"].get(submission.item_id)

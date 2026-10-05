@@ -136,7 +136,7 @@ export function ProjectOverviewPage() {
 
       <section aria-label="项目操作" className="step-grid">
         <StepCard
-          description={isReid ? "关联已有数据集目录，或从视频抽取。" : "上传图片或关联服务器上的目录。"}
+          description={isReid ? "关联已有数据集目录，或从视频抽取。" : "上传数据或关联服务器上的目录。"}
           icon={<ImportIcon />}
           primary={noData}
           title="导入数据"
@@ -144,7 +144,7 @@ export function ProjectOverviewPage() {
         />
         {entry && (
           <StepCard
-            description={isReid ? "逐对判断两段轨迹是否为同一人。" : "逐张标注，结果实时写入本地。"}
+            description={isReid ? "逐对判断两段轨迹是否为同一人。" : "逐条标注，结果实时写入本地。"}
             disabledReason={annotateBlocked}
             icon={<AnnotateIcon />}
             primary={!noData && !annotateBlocked}

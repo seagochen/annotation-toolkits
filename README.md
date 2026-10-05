@@ -30,8 +30,8 @@ flowchart LR
 | 任务类型 | 功能 | 实现 |
 |---|---|---|
 | `reid` | 数据抽取、候选挖掘、成对审核、逻辑冲突检测、数据定版、训练交接 | [`backend/reid_annotation_tool/`](backend/reid_annotation_tool/) |
-| `classification` | 图像单/多标签分类 | [`classification_task.py`](backend/annotation_platform/classification_task.py) |
-| `captioning` | 图像自由文本描述 | [`caption_task.py`](backend/annotation_platform/caption_task.py) |
+| `classification` | 图像或文本文档的单/多标签分类 | [`classification_task.py`](backend/annotation_platform/classification_task.py) |
+| `captioning` | 图像描述；文本文档的翻译、摘要等自由文本生成 | [`caption_task.py`](backend/annotation_platform/caption_task.py) |
 | `detection` | 目标检测框标注，COCO 兼容导出 | [`detection_task.py`](backend/annotation_platform/detection_task.py) |
 | `segmentation` | 图像分割（画笔 + 多边形），COCO 兼容导出 | [`segmentation_task.py`](backend/annotation_platform/segmentation_task.py) |
 | `depth` | 深度图画笔标注 | [`depth_task.py`](backend/annotation_platform/depth_task.py) |
@@ -39,9 +39,9 @@ flowchart LR
 > 以上六种任务类型均已端到端验证（单元测试 + 一次真实浏览器交互，见
 > [`docs/detailed_design/00_概述.md`](docs/detailed_design/00_概述.md) §16.1）。
 > 文本标注范围已在 [#20](https://github.com/seagochen/annotation-toolkits/issues/20)
-> 中决定（文档级分类/自由文本生成复用现有模块，span/区间标注新增独立模块），
-> 实现跟踪见 [#39](https://github.com/seagochen/annotation-toolkits/issues/39)、
-> [#40](https://github.com/seagochen/annotation-toolkits/issues/40)，尚未落地。
+> 中决定：文档级分类/自由文本生成复用 `classification`/`captioning`（数据源由
+> `patterns` 决定，可以是 UTF-8 文本，[#39](https://github.com/seagochen/annotation-toolkits/issues/39)），
+> span/区间标注新增独立模块（[#40](https://github.com/seagochen/annotation-toolkits/issues/40)，尚未落地）。
 
 ## 运行要件
 

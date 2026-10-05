@@ -1,8 +1,9 @@
-"""Shared base for task types that annotate a local directory of images.
+"""Shared base for task types that annotate a local directory of files.
 
-Classification, captioning, detection, segmentation and depth all read the
-same kind of project: a ``dataset`` directory, glob ``patterns`` for its
-images, and an ``annotations`` sidecar inside the dataset. Everything that is
+Classification, captioning, detection, segmentation, depth, polygon and
+text_span all read the same kind of project: a ``dataset`` directory, glob
+``patterns`` for its files (images, or UTF-8 text documents for the text
+tasks), and an ``annotations`` sidecar inside the dataset. Everything that is
 the same for all of them lives here, once:
 
 - config parsing of those keys (``read_config``, ``config_patterns``,
@@ -31,6 +32,8 @@ from typing import Callable, ClassVar
 import yaml
 
 from local_files import file_lock
+
+from .file_kinds import DocumentError, media_kind, read_document
 
 from .task_types import (
     STATUS_EMPTY,
@@ -233,6 +236,37 @@ class ImageTaskStore:
         if path is None:
             raise TaskOperationError(f"unknown {self.task} item {item_id!r}")
         return path
+
+    def document_text(self, relative: str) -> str:
+        """A text item's content, or an explicit error naming the file."""
+        try:
+            return read_document(self.project.dataset / relative)
+        except DocumentError as error:
+            raise TaskOperationError(f"{self.task} document {relative!r} {error}") from error
+
+    def media_fields(self, relative: str) -> dict:
+        """``media`` plus, for text, its content or the reason it is unreadable.
+
+        Images are shown by the browser straight from the files endpoint;
+        text is decoded here so the page never guesses an encoding.
+        """
+        if media_kind(relative) == "image":
+            return {"media": "image"}
+        try:
+            return {"media": "text", "text": self.document_text(relative), "text_error": None}
+        except TaskOperationError as error:
+            return {"media": "text", "text": None, "text_error": str(error)}
+
+    def submittable_path(self, item_id: str) -> str:
+        """``image_path`` of an item a result may be saved for.
+
+        A text document that cannot be decoded was never shown to anyone, so
+        nothing may be recorded against it.
+        """
+        relative = self.image_path(item_id)
+        if media_kind(relative) == "text":
+            self.document_text(relative)
+        return relative
 
     def _read(self) -> dict:
         label = self.sidecar_label

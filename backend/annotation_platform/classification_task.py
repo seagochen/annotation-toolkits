@@ -1,4 +1,4 @@
-"""Image-level single-label and multi-label classification task module."""
+"""Single-label and multi-label classification of images or text documents."""
 
 from __future__ import annotations
 
@@ -67,6 +67,7 @@ class ClassificationStore(ImageTaskStore):
         return {
             "item_id": item_id,
             "image_path": image_path,
+            **self.media_fields(image_path),
             "labels": [] if saved is None else saved["labels"],
         }
 
@@ -93,7 +94,7 @@ class ClassificationStore(ImageTaskStore):
 
     def submit(self, submission: Submission) -> dict:
         labels = self._labels(submission.result.get("labels"))
-        image_path = self.image_path(submission.item_id)
+        image_path = self.submittable_path(submission.item_id)
         with self.lock:
             state = self._read()
             current = state["items"].get(submission.item_id)

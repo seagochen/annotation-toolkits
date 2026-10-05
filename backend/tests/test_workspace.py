@@ -493,6 +493,53 @@ def test_archive_import_extracts_images_and_skips_everything_else(tmp_path):
     assert broken.json()["detail"]["code"] == "invalid_archive"
 
 
+def test_text_tasks_accept_utf8_documents_and_nothing_else(tmp_path):
+    app = make_app(tmp_path)
+    create(app, "Reviews", "classification", {
+        "labels": ["positive", "negative"], "patterns": ["**/*.txt", "**/*.md"],
+    })
+    data = tmp_path / "ws" / "projects" / "reviews" / "data"
+    types = {item["type"]: item for item in request(app, "GET", "/api/task-types").json()}
+    assert types["classification"]["upload_extensions"] == [
+        ".jpeg", ".jpg", ".md", ".png", ".txt", ".webp",
+    ]
+    assert types["detection"]["upload_extensions"] == [".jpeg", ".jpg", ".png", ".webp"]
+    assert types["reid"]["upload_extensions"] == []
+
+    text = "很好用。\n第二行".encode("utf-8")
+    response = upload(app, "reviews", "batch 1/a.TXT", text)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"path": "batch 1/a.txt", "size": len(text)}
+    assert upload(app, "reviews", "b.md", "# 标题".encode("utf-8")).status_code == 200
+    for path, content in (("latin.txt", b"caf\xe9"), ("nul.txt", b"a\x00b"), ("x.json", b"{}")):
+        response = upload(app, "reviews", path, content)
+        assert response.status_code == 422, path
+        assert response.json()["detail"]["code"] == "unsupported_file"
+    queue = request(app, "GET", "/api/projects/reviews/queue").json()
+    assert [(item["image_path"], item["text"]) for item in queue["items"]] == [
+        ("b.md", "# 标题"), ("batch 1/a.txt", "很好用。\n第二行"),
+    ]
+
+    archive = zip_bytes({
+        "docs/c.txt": "第三篇".encode("utf-8"),
+        "docs/bad.txt": b"\xff\xfe",
+        "docs/d.jpg": JPEG,
+        "docs/e.csv": b"a,b",
+    })
+    response = request(
+        app, "POST", "/api/projects/reviews/import/archive",
+        content=archive, headers={"Content-Type": "application/zip"},
+    )
+    assert response.json() == {"imported": 2, "skipped": 2}
+    assert (data / "docs" / "c.txt").read_text(encoding="utf-8") == "第三篇"
+    assert not (data / "docs" / "bad.txt").exists()
+    assert not list(data.rglob(".upload-*"))
+
+    # Detection projects still take images only.
+    create(app, "Boxes", "detection", {"categories": ["box"]})
+    assert upload(app, "boxes", "a.txt", text).json()["detail"]["code"] == "unsupported_file"
+
+
 def test_link_directory_is_confined_to_allowed_roots(tmp_path):
     allowed = tmp_path / "allowed"
     (allowed / "set-a").mkdir(parents=True)

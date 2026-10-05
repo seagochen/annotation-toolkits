@@ -34,6 +34,7 @@ import yaml
 from local_files import atomic_write_bytes, file_lock
 from reid_annotation_tool.config import ConfigError as ReIDConfigError
 
+from .file_kinds import IMAGE_SUFFIXES, has_kind_content, kind_of
 from .project_forms import (
     MODEL_PATH_KEYS,
     ManagementError,
@@ -69,7 +70,6 @@ REGISTRY_NAME = "projects.yaml"
 PROJECTS_DIR = "projects"
 CONFIG_NAME = "config.yaml"
 DATA_DIR = "data"
-IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 MAX_NAME_LENGTH = 200
 MAX_ID_LENGTH = 48
 EXPORT_FORMAT = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -108,12 +108,13 @@ def slugify(name: str, fallback: str = "project") -> str:
     return slug[:MAX_ID_LENGTH].rstrip("-") or fallback
 
 
-def image_path_parts(relative: str) -> tuple[str, ...]:
-    """Validate a dataset-relative image path from an upload or archive entry.
+def upload_path_parts(relative: str, suffixes: frozenset[str] = IMAGE_SUFFIXES) -> tuple[str, ...]:
+    """Validate a dataset-relative path from an upload or archive entry.
 
     Hidden segments are refused outright: they are where the platform keeps
     its own state (``.annotations``, ``.jobs``, depth baselines), and an
-    upload must never be able to overwrite annotation results.
+    upload must never be able to overwrite annotation results. ``suffixes``
+    are the extensions the project's task type accepts.
     """
     if (
         not relative
@@ -129,10 +130,11 @@ def image_path_parts(relative: str) -> tuple[str, ...]:
             f"invalid relative path {relative!r}: empty, `..` or hidden segments are not allowed",
         )
     name = Path(parts[-1])
-    if name.suffix.lower() not in IMAGE_SUFFIXES:
+    if name.suffix.lower() not in suffixes:
         raise ManagementError(
             "unsupported_file",
-            f"only images can be imported ({', '.join(sorted(IMAGE_SUFFIXES))}): {relative!r}",
+            f"only {', '.join(sorted(suffixes))} files can be imported into this project: "
+            f"{relative!r}",
         )
     # Stored with a lowercase extension: the default `patterns` globs are
     # lowercase and case-sensitive on Linux, so IMG_0001.JPG would otherwise
@@ -140,24 +142,14 @@ def image_path_parts(relative: str) -> tuple[str, ...]:
     return (*parts[:-1], name.stem + name.suffix.lower())
 
 
-def is_image_content(head: bytes) -> bool:
-    """Whether leading bytes carry a JPEG, PNG or WebP signature.
-
-    Only the signature, not a decode (the backend never decodes images): it is
-    enough to stop arbitrary payloads -- a pickle named `weights.jpg` -- from
-    being planted in the dataset under an image extension.
-    """
-    return (
-        head.startswith(b"\xff\xd8\xff")
-        or head.startswith(b"\x89PNG\r\n\x1a\n")
-        or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
-    )
-
-
-def _not_an_image(name: str) -> ManagementError:
-    return ManagementError(
-        "unsupported_file", f"{name!r} is not a JPEG, PNG or WebP image"
-    )
+def _wrong_content(name: str) -> ManagementError:
+    kind = kind_of(Path(name).suffix)
+    expected = {
+        "image": "a JPEG, PNG or WebP image",
+        "text": "UTF-8 text",
+        "json": "a UTF-8 JSON document",
+    }.get(kind or "", "a supported file")
+    return ManagementError("unsupported_file", f"{name!r} is not {expected}")
 
 
 async def spool(chunks: AsyncIterator[bytes], directory: Path, suffix: str) -> tuple[Path, int]:
@@ -451,6 +443,13 @@ class Workspace:
 
     def upload_root(self, project_id: str) -> Path:
         """The managed data directory files may be imported into."""
+        return self._upload_destination(project_id)[0]
+
+    def upload_suffixes(self, project_id: str) -> frozenset[str]:
+        """The file extensions this project's task type accepts as uploads."""
+        return self._upload_destination(project_id)[1]
+
+    def _upload_destination(self, project_id: str) -> tuple[Path, frozenset[str]]:
         entry = self._entry(project_id)
         spec = task_type_spec(entry.task_type)
         if spec is None or "upload" not in spec.import_modes:
@@ -466,12 +465,12 @@ class Workspace:
             )
         root = self.managed_dir(entry.id)
         root.mkdir(parents=True, exist_ok=True)
-        return root.resolve()
+        return root.resolve(), spec.upload_suffixes()
 
     def upload_target(self, project_id: str, relative: str) -> tuple[Path, str]:
         """The destination file and its normalized dataset-relative path."""
-        root = self.upload_root(project_id)
-        parts = image_path_parts(relative)
+        root, suffixes = self._upload_destination(project_id)
+        parts = upload_path_parts(relative, suffixes)
         target = root.joinpath(*parts)
         _prepare_parent(root, target)
         return target, "/".join(parts)
@@ -707,12 +706,15 @@ def _prepare_parent(root: Path, target: Path) -> None:
 
 
 def place(temporary: Path, target: Path) -> None:
-    """Check the content and atomically move a written temporary file into place."""
-    with temporary.open("rb") as handle:
-        head = handle.read(12)
-    if not is_image_content(head):
+    """Check the content and atomically move a written temporary file into place.
+
+    The content is checked against the kind the target's extension names: an
+    image signature, UTF-8 text, or a parseable JSON document.
+    """
+    kind = kind_of(target.suffix)
+    if kind is None or not has_kind_content(temporary, kind):
         temporary.unlink(missing_ok=True)
-        raise _not_an_image(target.name)
+        raise _wrong_content(target.name)
     try:
         temporary.replace(target)
     except OSError as error:
@@ -727,8 +729,10 @@ def _has_files(directory: Path) -> bool:
     return False
 
 
-def extract_archive(archive: Path, root: Path) -> tuple[int, int]:
-    """Copy the image entries of a zip into ``root``; returns (imported, skipped).
+def extract_archive(
+    archive: Path, root: Path, suffixes: frozenset[str] = IMAGE_SUFFIXES
+) -> tuple[int, int]:
+    """Copy the accepted entries of a zip into ``root``; returns (imported, skipped).
 
     Entries are filtered with the same rules as single uploads, which also
     drops zip-slip names (``../x.jpg``, absolute paths) and macOS metadata.
@@ -748,20 +752,24 @@ def extract_archive(archive: Path, root: Path) -> tuple[int, int]:
                 skipped += 1
                 continue
             try:
-                target = root.joinpath(*image_path_parts(info.filename))
-                with bundle.open(info) as source:
-                    if not is_image_content(source.read(12)):
-                        raise _not_an_image(info.filename)
-                _prepare_parent(root, target)
-            except (ManagementError, OSError, RuntimeError, ValueError, zipfile.BadZipFile, zlib.error):
+                parts = upload_path_parts(info.filename, suffixes)
+            except ManagementError:
                 skipped += 1
                 continue
-            temporary = target.parent / f".upload-{uuid.uuid4().hex}.part"
+            # Spooled at the top of `root` and checked there, so an entry that
+            # turns out not to be what its extension says leaves no folders.
+            temporary = root / f".upload-{uuid.uuid4().hex}.part"
             try:
                 with bundle.open(info) as source, temporary.open("wb") as handle:
                     shutil.copyfileobj(source, handle, 1024 * 1024)
+                if not has_kind_content(temporary, kind_of(Path(parts[-1]).suffix) or ""):
+                    raise _wrong_content(info.filename)
+                target = root.joinpath(*parts)
+                _prepare_parent(root, target)
                 temporary.replace(target)
-            except (OSError, RuntimeError, ValueError, zipfile.BadZipFile, zlib.error):
+            except (
+                ManagementError, OSError, RuntimeError, ValueError, zipfile.BadZipFile, zlib.error
+            ):
                 # Encrypted, corrupt or unsupported entries are skipped, not
                 # fatal: the rest of the archive is still worth importing.
                 temporary.unlink(missing_ok=True)

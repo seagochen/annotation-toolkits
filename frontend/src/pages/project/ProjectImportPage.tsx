@@ -6,7 +6,7 @@ import {
   linkDirectory,
   listTaskTypes,
   uploadArchive,
-  uploadImage,
+  uploadFile,
   type ProjectSettings,
   type TaskTypeInfo,
 } from "../../api/client";
@@ -15,7 +15,6 @@ import { summaryProgress } from "../../project-meta";
 import { ProjectHeader, ProjectStateGate } from "./ProjectHeader";
 import { useProject } from "./useProject";
 
-const IMAGE = /\.(jpe?g|png|webp)$/i;
 const ZIP = /\.zip$/i;
 const CONCURRENCY = 4;
 
@@ -28,6 +27,20 @@ type UploadState = {
   archives: number;
   running: boolean;
 };
+
+/** Lowercase extension with its dot ("a/B.TXT" → ".txt"), or "". */
+function extension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot).toLowerCase() : "";
+}
+
+/** "JPG / PNG / TXT" from [".jpg", ".png", ".txt"], dropping the .jpeg alias. */
+function describeExtensions(extensions: readonly string[]): string {
+  return extensions
+    .filter((value) => value !== ".jpeg")
+    .map((value) => value.slice(1).toUpperCase())
+    .join(" / ");
+}
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : "未知错误";
@@ -116,13 +129,15 @@ export function ProjectImportPage() {
   const managed = settings?.data_source.mode === "managed";
   const canUpload = Boolean(settings) && managed && modes.includes("upload");
   const canLink = modes.includes("directory");
+  const extensions = typeInfo?.upload_extensions ?? [];
+  const takesText = extensions.includes(".txt");
 
   async function refreshAfterImport() {
     await Promise.all([reload(), reloadProjects()]);
   }
 
   async function importPicked(picked: Picked[]) {
-    const images = picked.filter((item) => IMAGE.test(item.file.name) && item.path);
+    const images = picked.filter((item) => extensions.includes(extension(item.file.name)) && item.path);
     const archives = picked.filter((item) => ZIP.test(item.file.name));
     const skipped = picked.length - images.length - archives.length;
     const next: UploadState = {
@@ -144,7 +159,7 @@ export function ProjectImportPage() {
       for (let item = queue.shift(); item; item = queue.shift()) {
         const current = item;
         try {
-          await uploadImage(projectId, current.path, current.file);
+          await uploadFile(projectId, current.path, current.file);
           setUpload((state) => state && { ...state, done: state.done + 1 });
         } catch (error) {
           setUpload(
@@ -222,7 +237,7 @@ export function ProjectImportPage() {
             </div>
             {progress && !isReid && (
               <div>
-                <dt>图像数量</dt>
+                <dt>{takesText ? "文件数量" : "图像数量"}</dt>
                 <dd>{progress.total}</dd>
               </div>
             )}
@@ -242,11 +257,16 @@ export function ProjectImportPage() {
             }}
             onDrop={(event) => void onDrop(event)}
           >
-            <p className="dropzone-title">把图片、文件夹或 ZIP 压缩包拖到这里</p>
-            <p className="muted">支持 JPG / PNG / WebP；同名文件会被覆盖，文件夹结构会保留。</p>
+            <p className="dropzone-title">
+              {takesText ? "把图片、文本文档、文件夹或 ZIP 压缩包拖到这里" : "把图片、文件夹或 ZIP 压缩包拖到这里"}
+            </p>
+            <p className="muted">
+              支持 {describeExtensions(extensions)}；同名文件会被覆盖，文件夹结构会保留。
+              {takesText && " 文本需为 UTF-8 编码；要标注文本时，请在属性的“文件匹配模式”中加入 **/*.txt 等。"}
+            </p>
             <div className="dropzone-buttons">
               <button className="button-secondary" disabled={upload?.running} onClick={() => fileInput.current?.click()} type="button">
-                选择图片
+                {takesText ? "选择文件" : "选择图片"}
               </button>
               <button className="button-secondary" disabled={upload?.running} onClick={() => folderInput.current?.click()} type="button">
                 选择文件夹
@@ -255,7 +275,7 @@ export function ProjectImportPage() {
                 上传 ZIP
               </button>
             </div>
-            <input accept="image/jpeg,image/png,image/webp" hidden multiple onChange={(event) => pickFrom(event.currentTarget)} ref={fileInput} type="file" />
+            <input accept={extensions.join(",")} hidden multiple onChange={(event) => pickFrom(event.currentTarget)} ref={fileInput} type="file" />
             <input hidden multiple onChange={(event) => pickFrom(event.currentTarget)} ref={folderInput} type="file" />
             <input accept=".zip,application/zip" hidden onChange={(event) => pickFrom(event.currentTarget)} ref={zipInput} type="file" />
           </div>
@@ -271,7 +291,7 @@ export function ProjectImportPage() {
               <div className="progress-track">
                 <span style={{ width: `${percent}%` }} />
               </div>
-              {upload.skipped > 0 && <p className="muted">已跳过 {upload.skipped} 个非图片文件。</p>}
+              {upload.skipped > 0 && <p className="muted">已跳过 {upload.skipped} 个不支持的文件。</p>}
               {upload.failed.length > 0 && (
                 <details className="upload-failures">
                   <summary>{upload.failed.length} 个文件失败</summary>
@@ -300,7 +320,7 @@ export function ProjectImportPage() {
           <p className="muted">
             {isReid
               ? "指向一个已有的 ReID 数据集目录（含 identities.csv 等）。不关联时，可在概览页用“抽取数据”从属性中设置的视频目录生成。"
-              : "直接读取服务器上的图片目录，不复制文件；标注结果写在该目录的 .annotations 下。"}
+              : "直接读取服务器上的数据目录，不复制文件；标注结果写在该目录的 .annotations 下。"}
             {managed && canUpload && " 只有在还没有上传任何数据时才能改为关联目录。"}
           </p>
           <div className="inline-form">

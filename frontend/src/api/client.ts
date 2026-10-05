@@ -259,7 +259,7 @@ async function postBinary(endpoint: string, body: Blob, fallback: string): Promi
   return payload;
 }
 
-export async function uploadImage(projectId: string, path: string, file: Blob): Promise<void> {
+export async function uploadFile(projectId: string, path: string, file: Blob): Promise<void> {
   const query = new URLSearchParams({ path });
   await postBinary(
     `/api/projects/${encodeURIComponent(projectId)}/import/files?${query}`,

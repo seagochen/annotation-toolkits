@@ -17,11 +17,13 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Literal, Mapping
 
+from .file_kinds import KIND_SUFFIXES
 from .image_dataset import DEFAULT_PATTERNS
 
 FieldType = Literal["text", "path", "integer", "number", "boolean", "select", "list"]
 LockRule = Literal["none", "append_only", "locked"]
 ImportMode = Literal["upload", "directory", "managed"]
+UploadKind = Literal["image", "text", "json"]
 
 # Keys whose value is a model/checkpoint file the platform (or the trainer and
 # evaluator it launches) loads. Torch checkpoints are pickles, so loading one
@@ -95,6 +97,12 @@ class TaskTypeSpec:
     # Config keys that are not form fields but are just as server-only: the
     # raw config editor must not change them either (see ReID below).
     server_only_keys: tuple[str, ...] = ()
+    # What an upload may carry (file_kinds.KIND_SUFFIXES); content is checked
+    # against the kind its extension names.
+    upload_kinds: tuple[UploadKind, ...] = ("image",)
+
+    def upload_suffixes(self) -> frozenset[str]:
+        return frozenset().union(*(KIND_SUFFIXES[kind] for kind in self.upload_kinds))
 
     def find_field(self, key: str) -> FieldSpec | None:
         for spec in self.fields:
@@ -103,15 +111,23 @@ class TaskTypeSpec:
         return None
 
 
-def _patterns(default: tuple[str, ...]) -> FieldSpec:
+def _patterns(default: tuple[str, ...], help: str | None = None) -> FieldSpec:
     return FieldSpec(
         key="patterns",
         label="文件匹配模式",
         type="list",
         default=list(default),
-        help="相对数据集根目录的 glob 模式，用于发现待标注图片；一般保持默认即可。",
+        help=help or "相对数据集根目录的 glob 模式，用于发现待标注图片；一般保持默认即可。",
         group="高级",
     )
+
+
+# Classification and captioning read images or UTF-8 text documents: which
+# one is decided by `patterns`, never by a separate switch.
+TEXT_PATTERNS_HELP = (
+    "相对数据集根目录的 glob 模式，用于发现待标注文件。默认只匹配图片；标注文本文档"
+    "（UTF-8）时改为 **/*.txt 等。图片扩展名之外的文件一律按文本展示。"
+)
 
 
 NATIVE = ExportFormat("native", "原生 JSON")
@@ -119,9 +135,10 @@ NATIVE = ExportFormat("native", "原生 JSON")
 TASK_TYPE_SPECS: tuple[TaskTypeSpec, ...] = (
     TaskTypeSpec(
         type="classification",
-        label="图像分类",
-        description="为每张图片选择一个或多个预定义标签。",
+        label="分类",
+        description="为每张图片或每篇文本文档选择一个或多个预定义标签。",
         import_modes=("upload", "directory"),
+        upload_kinds=("image", "text"),
         export_formats=(NATIVE, ExportFormat("csv", "CSV")),
         fields=(
             FieldSpec(
@@ -145,16 +162,17 @@ TASK_TYPE_SPECS: tuple[TaskTypeSpec, ...] = (
                 help="开始标注后不可再修改。",
                 lock="locked",
             ),
-            _patterns(DEFAULT_PATTERNS),
+            _patterns(DEFAULT_PATTERNS, TEXT_PATTERNS_HELP),
         ),
     ),
     TaskTypeSpec(
         type="captioning",
-        label="图像描述",
-        description="为每张图片撰写一段自由文本描述。",
+        label="描述 / 文本生成",
+        description="为每张图片撰写描述，或为每篇文本写出翻译、摘要等自由文本。",
         import_modes=("upload", "directory"),
+        upload_kinds=("image", "text"),
         export_formats=(NATIVE, ExportFormat("csv", "CSV")),
-        fields=(_patterns(DEFAULT_PATTERNS),),
+        fields=(_patterns(DEFAULT_PATTERNS, TEXT_PATTERNS_HELP),),
     ),
     TaskTypeSpec(
         type="detection",
@@ -384,6 +402,7 @@ def describe_spec(spec: TaskTypeSpec) -> dict:
         "label": spec.label,
         "description": spec.description,
         "import_modes": list(spec.import_modes),
+        "upload_extensions": sorted(spec.upload_suffixes()) if "upload" in spec.import_modes else [],
         "export_formats": [asdict(item) for item in spec.export_formats],
         "fields": [describe_field(item) for item in spec.fields],
     }

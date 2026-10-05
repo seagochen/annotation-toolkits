@@ -236,3 +236,28 @@ kbd {
   .workspace-panel { border-top: 1px solid var(--line); border-left: 0; }
   .workspace-panel-footer { position: sticky; bottom: 0; }
 }
+
+/* Text documents: the stage turns into a readable page that scrolls. */
+.stage-text { width: 100%; height: 100%; padding: 24px; overflow-y: auto; background: var(--bg); }
+.text-document {
+  max-width: 72ch;
+  margin: 0 auto;
+  padding: 28px 32px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.text-document-error {
+  max-width: 72ch;
+  margin: 0 auto;
+  padding: 16px 20px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.text-document-error p { margin: 6px 0 0; font-family: var(--mono); font-size: 0.85rem; overflow-wrap: anywhere; }

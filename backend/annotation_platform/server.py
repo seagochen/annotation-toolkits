@@ -141,6 +141,8 @@ class TaskTypeInfo(BaseModel):
     label: str
     description: str
     import_modes: list[Literal["upload", "directory", "managed"]]
+    # Extensions (lowercase, with the dot) that `upload` mode accepts.
+    upload_extensions: list[str]
     export_formats: list[ExportFormatInfo]
     fields: list[FieldSpec]
 
@@ -601,11 +603,14 @@ def _add_management_routes(application: FastAPI) -> None:
     ) -> dict:
         try:
             root = workspace.upload_root(project_id)
+            suffixes = workspace.upload_suffixes(project_id)
             # Spooled next to (not inside) the dataset, then extracted off the
             # event loop: a large archive must not stall every other request.
             archive, _ = await spool(request.stream(), root.parent, ".zip")
             try:
-                imported, skipped = await run_in_threadpool(extract_archive, archive, root)
+                imported, skipped = await run_in_threadpool(
+                    extract_archive, archive, root, suffixes
+                )
             finally:
                 archive.unlink(missing_ok=True)
         except ManagementError as error:

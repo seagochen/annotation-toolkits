@@ -1,20 +1,22 @@
 import { useState } from "react";
 import { useParams } from "wouter";
 
-import { projectFileUrl } from "../../api/client";
 import { PanelSection, SubmitBar, TaskWorkspace } from "../../components/workspace/TaskWorkspace";
 import { MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
 import { summaryProgress } from "../../project-meta";
+import { ItemStage, isTextItem } from "../ItemStage";
 import { QueueFallback, itemText, useTaskQueue } from "../useTaskQueue";
 
+// Same limits as caption_task.py: captions vs. text generated for a document.
 const MAX_CAPTION_LENGTH = 2000;
+const MAX_GENERATED_TEXT_LENGTH = 20000;
 
 export function CaptionReviewPage() {
   const { projectId = "" } = useParams();
   const [caption, setCaption] = useState("");
   const queue = useTaskQueue(projectId, {
     taskType: "captioning",
-    wrongType: "该项目不是图像描述任务。",
+    wrongType: "该项目不是描述 / 文本生成任务。",
     onLoad: () => setCaption(""),
   });
   const { ready, item, submitting, submitError } = queue;
@@ -39,8 +41,8 @@ export function CaptionReviewPage() {
   if (!ready || !item) {
     return (
       <QueueFallback
-        doneDescription="当前没有待描述图像，所有结果均已原子写入本地 JSON。"
-        doneTitle="图像描述已完成"
+        doneDescription="当前没有待处理条目，所有结果均已原子写入本地 JSON。"
+        doneTitle="描述 / 文本生成已完成"
         loading="正在读取描述队列…"
         projectId={projectId}
         queue={queue}
@@ -49,6 +51,8 @@ export function CaptionReviewPage() {
   }
 
   const imagePath = itemText(item, "image_path");
+  const isText = isTextItem(item);
+  const limit = isText ? MAX_GENERATED_TEXT_LENGTH : MAX_CAPTION_LENGTH;
   return (
     <TaskWorkspace
       fileName={imagePath}
@@ -56,39 +60,36 @@ export function CaptionReviewPage() {
         <SubmitBar
           disabled={!trimmed}
           error={submitError}
-          hint="先输入描述文本"
+          hint={isText ? "先输入文本" : "先输入描述文本"}
           onSubmit={() => void submit()}
           submitting={submitting}
         />
       }
       hotkeys={hotkeys}
       panel={
-        <PanelSection title="描述文本">
+        <PanelSection title={isText ? "生成文本（翻译、摘要等）" : "描述文本"}>
           <textarea
-            aria-label="图像描述"
+            aria-label={isText ? "生成文本" : "图像描述"}
             autoFocus
             className="panel-textarea"
             disabled={submitting}
             key={itemText(item, "item_id")}
-            maxLength={MAX_CAPTION_LENGTH}
+            maxLength={limit}
             onChange={(event) => setCaption(event.target.value)}
-            placeholder="描述这张图像的内容…"
-            rows={8}
+            placeholder={isText ? "根据左侧文本写出译文、摘要等…" : "描述这张图像的内容…"}
+            rows={isText ? 16 : 8}
             value={caption}
           />
-          <p className="char-count">{trimmed.length} / {MAX_CAPTION_LENGTH}</p>
+          <p className="char-count">{trimmed.length} / {limit}</p>
         </PanelSection>
       }
       progress={summaryProgress(ready.project.summary, ready.queue.total)}
       projectId={projectId}
       projectName={ready.project.name}
       remaining={ready.queue.total}
-      stage={
-        <figure className="stage-image">
-          <img alt={imagePath} src={projectFileUrl(projectId, imagePath)} />
-        </figure>
-      }
-      title="图像描述"
+      stage={<ItemStage item={item} projectId={projectId} />}
+      title={isText ? "文本生成" : "图像描述"}
+      unit={isText ? "篇" : "张"}
     />
   );
 }

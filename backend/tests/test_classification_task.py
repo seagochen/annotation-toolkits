@@ -127,3 +127,54 @@ def test_invalid_config_is_rejected(tmp_path, body, message):
     config.write_text(body, encoding="utf-8")
     with pytest.raises(TaskOperationError, match=message):
         ClassificationTaskType().load(config)
+
+
+def text_project(tmp_path: Path) -> Path:
+    dataset = tmp_path / "docs"
+    dataset.mkdir()
+    (dataset / "short.txt").write_text("好评！\n", encoding="utf-8")
+    long = "\n\n".join(f"第 {index} 段：" + "内容 " * 50 for index in range(40))
+    # A BOM and CRLF line endings: the BOM is dropped, the endings kept.
+    (dataset / "long.txt").write_bytes(("﻿" + long.replace("\n", "\r\n")).encode("utf-8"))
+    (dataset / "broken.txt").write_bytes(b"caf\xe9 latin-1")
+    (dataset / "photo.jpg").write_bytes(b"image")
+    config = tmp_path / "classification.yaml"
+    config.write_text(
+        "dataset: ./docs\nlabels: [positive, negative]\nmode: single\n"
+        "patterns: ['**/*.txt', '**/*.jpg']\n",
+        encoding="utf-8",
+    )
+    return config
+
+
+def test_text_documents_are_queued_with_their_decoded_content(tmp_path):
+    module = ClassificationTaskType()
+    project = module.load(text_project(tmp_path))
+    items = {item["image_path"]: item for item in module.queue(project, QueueRequest()).items}
+    assert items["photo.jpg"]["media"] == "image"
+    assert "text" not in items["photo.jpg"]
+    assert items["short.txt"]["media"] == "text"
+    assert items["short.txt"]["text"] == "好评！\n"
+    assert items["short.txt"]["text_error"] is None
+    long = items["long.txt"]["text"]
+    assert not long.startswith("﻿") and "\r\n\r\n" in long and long.count("第 ") == 40
+    assert items["broken.txt"]["text"] is None
+    assert "not valid UTF-8" in items["broken.txt"]["text_error"]
+
+    saved = module.submit(project, Submission(items["short.txt"]["item_id"], {"labels": ["positive"]}))
+    assert saved.item["labels"] == ["positive"]
+    with pytest.raises(TaskOperationError, match="broken.txt.*not valid UTF-8"):
+        module.submit(project, Submission(items["broken.txt"]["item_id"], {"labels": ["negative"]}))
+    state = json.loads((tmp_path / "docs" / ".annotations" / "classification.json").read_text())
+    assert [saved["image_path"] for saved in state["items"].values()] == ["short.txt"]
+
+
+def test_oversized_and_binary_documents_report_an_error(tmp_path, monkeypatch):
+    module = ClassificationTaskType()
+    project = module.load(text_project(tmp_path))
+    (tmp_path / "docs" / "binary.txt").write_bytes(b"\x00\x01\x02")
+    monkeypatch.setattr("annotation_platform.file_kinds.MAX_DOCUMENT_BYTES", 100)
+    items = {item["image_path"]: item for item in module.queue(project, QueueRequest()).items}
+    assert "NUL" in items["binary.txt"]["text_error"]
+    assert "limited to 100 bytes" in items["long.txt"]["text_error"]
+    assert items["short.txt"]["text"] == "好评！\n"

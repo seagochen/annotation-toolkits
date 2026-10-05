@@ -37,6 +37,7 @@ const classificationType = {
   label: "图像分类",
   description: "为每张图像选择标签。",
   import_modes: ["upload", "directory"],
+  upload_extensions: [".jpeg", ".jpg", ".md", ".png", ".txt", ".webp"],
   export_formats: [{ format: "native", label: "原生 JSON" }],
   fields: [
     {
@@ -421,7 +422,7 @@ describe("project pages", () => {
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
 
-    expect(await screen.findByRole("heading", { name: "图像分类已完成" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "分类已完成" })).toBeVisible();
     const request = fetchMock.mock.calls[2][0] as Request;
     await expect(request.clone().json()).resolves.toEqual({
       item_id: "i1",
@@ -507,12 +508,99 @@ describe("project pages", () => {
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
 
-    expect(await screen.findByRole("heading", { name: "图像描述已完成" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "描述 / 文本生成已完成" })).toBeVisible();
     const request = fetchMock.mock.calls[2][0] as Request;
     await expect(request.clone().json()).resolves.toEqual({
       item_id: "i1",
       result: { caption: "A busy street." },
     });
+  });
+
+  it("shows text documents for classification and generation, and explains unreadable ones", async () => {
+    const document = "第一段。\n\n第二段很长。";
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "reviews",
+          name: "Reviews",
+          task_type: "classification",
+          root: "/data/reviews",
+          status: "reviewing",
+          summary: { mode: "single", labels: ["positive", "negative"] },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 2,
+          offset: 0,
+          limit: 1,
+          items: [
+            { item_id: "t1", image_path: "a.txt", media: "text", text: document, text_error: null, labels: [] },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          item: { item_id: "t1", image_path: "a.txt", labels: ["positive"] },
+          status: { state: "reviewing", details: { pending: 1 } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 1,
+          offset: 0,
+          limit: 1,
+          items: [
+            {
+              item_id: "t2",
+              image_path: "b.txt",
+              media: "text",
+              text: null,
+              text_error: "classification document 'b.txt' is not valid UTF-8 (byte 3)",
+              labels: [],
+            },
+          ],
+        }),
+      );
+
+    renderAt("/projects/reviews/classify");
+    const article = await screen.findByRole("article", { name: "文本：a.txt" });
+    expect(article.textContent).toBe(document);
+    expect(screen.getByRole("heading", { name: "文本分类" })).toBeVisible();
+    expect(screen.queryByRole("img")).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "positive" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存并继续" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("not valid UTF-8");
+    expect(screen.queryByRole("article")).toBeNull();
+  });
+
+  it("allows long generated text for a document", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "docs",
+          name: "Docs",
+          task_type: "captioning",
+          root: "/data/docs",
+          status: "reviewing",
+          summary: {},
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 1,
+          offset: 0,
+          limit: 1,
+          items: [{ item_id: "d1", image_path: "a.md", media: "text", text: "# Title", text_error: null, caption: "" }],
+        }),
+      );
+
+    renderAt("/projects/docs/caption");
+    const textarea = await screen.findByLabelText("生成文本");
+    expect(textarea).toHaveAttribute("maxLength", "20000");
+    expect(screen.getByRole("article", { name: "文本：a.md" })).toHaveTextContent("# Title");
+    expect(screen.getByRole("heading", { name: "文本生成" })).toBeVisible();
   });
 
   it("loads image dimensions and submits an empty-box detection result", async () => {
