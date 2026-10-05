@@ -60,13 +60,14 @@ export async function getProject(projectId: string): Promise<ProjectDetail> {
 export async function getQueue(
   projectId: string,
   status = "pending",
+  offset = 0,
 ): Promise<QueueResponse> {
   const { data, error, response } = await client.GET(
     "/api/projects/{project_id}/queue",
     {
       params: {
         path: { project_id: projectId },
-        query: { offset: 0, limit: 1, status },
+        query: { offset, limit: 1, status },
       },
     },
   );

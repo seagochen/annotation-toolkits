@@ -28,7 +28,66 @@ const summaryLabels: Record<string, string> = {
   pairs: "候选对",
   rounds: "审核轮次",
   live_round: "当前轮次",
+  prelabels: "预标文件",
+  prelabel_images: "已加载预标的图像",
+  prelabel_issue_count: "未加载的预标条目",
+  prelabel_error: "预标文件错误",
 };
+
+/** Summary keys shown in their own card instead of the generic list. */
+const SEPARATE_KEYS = new Set(["prelabel_issues"]);
+
+type PrelabelIssue = {
+  file_name: string | null;
+  image_id: number | null;
+  annotation_id: number | null;
+  reason: string;
+};
+
+function prelabelIssues(summary: Record<string, unknown>): PrelabelIssue[] {
+  const value = summary.prelabel_issues;
+  return Array.isArray(value)
+    ? value.filter((entry): entry is PrelabelIssue => Boolean(entry) && typeof entry === "object" && "reason" in entry)
+    : [];
+}
+
+/** Every prelabel entry that was not loaded, with why (never dropped silently). */
+function PrelabelIssues({ summary }: { summary: Record<string, unknown> }) {
+  const issues = prelabelIssues(summary);
+  const total = typeof summary.prelabel_issue_count === "number" ? summary.prelabel_issue_count : issues.length;
+  if (!total) return null;
+  return (
+    <article aria-label="未加载的预标" className="card">
+      <h2>未加载的预标（{total} 条）</h2>
+      <p className="muted">
+        以下条目没有加载。某张图只要有一条预标不合法，该图的预标就整体不加载、从空白开始，避免只加载一部分。
+        {total > issues.length && ` 仅列出前 ${issues.length} 条。`}
+      </p>
+      <div className="table-scroll">
+        <table className="issue-table">
+          <thead>
+            <tr>
+              <th>file_name</th>
+              <th>image id</th>
+              <th>annotation id</th>
+              <th>原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            {issues.map((issue, index) => (
+              <tr key={index}>
+                <td className="mono">{issue.file_name ?? "—"}</td>
+                <td className="mono">{issue.image_id ?? "—"}</td>
+                <td className="mono">{issue.annotation_id ?? "—"}</td>
+                <td>{issue.reason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  );
+}
 
 function SummaryValue({ value }: { value: unknown }) {
   if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) {
@@ -105,9 +164,11 @@ export function ProjectOverviewPage() {
       ? undefined
       : project.status === "reviewed"
         ? "全部已完成，没有待处理的条目。"
-        : isReid
-          ? "需要先完成抽取与候选挖掘（见下方 ReID 流水线）。"
-          : "还没有可标注的数据，请先导入。";
+        : project.status === "invalid"
+          ? "项目配置引用的文件无法使用，请查看下方任务摘要中的错误。"
+          : isReid
+            ? "需要先完成抽取与候选挖掘（见下方 ReID 流水线）。"
+            : "还没有可标注的数据，请先导入。";
 
   return (
     <div className="page">
@@ -161,7 +222,7 @@ export function ProjectOverviewPage() {
       <article className="card">
         <h2>任务摘要</h2>
         <dl>
-          {Object.entries(project.summary).map(([key, value]) => (
+          {Object.entries(project.summary).filter(([key]) => !SEPARATE_KEYS.has(key)).map(([key, value]) => (
             <div className="summary-row" key={key}>
               <dt>
                 {summaryLabels[key] ?? null}
@@ -174,6 +235,8 @@ export function ProjectOverviewPage() {
           ))}
         </dl>
       </article>
+
+      <PrelabelIssues summary={project.summary} />
     </div>
   );
 }

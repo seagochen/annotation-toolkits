@@ -11,6 +11,9 @@ import { ErrorState, LoadingState } from "../components/AsyncState";
 import { CompleteState } from "../components/workspace/TaskWorkspace";
 
 export type QueueItem = QueueResponse["items"][number];
+/** Which queue page is shown: the next pending item, or one already annotated. */
+export type QueueView = Readonly<{ status: "pending" | "annotated"; offset: number }>;
+const PENDING: QueueView = { status: "pending", offset: 0 };
 export type ReadyQueue = Readonly<{ project: ProjectDetail; queue: QueueResponse }>;
 type QueueState =
   | { kind: "loading" }
@@ -54,12 +57,19 @@ export function useTaskQueue(
   const onLoad = useRef(options.onLoad);
   onLoad.current = options.onLoad;
   const busy = useRef(false);
+  const [view, setView] = useState<QueueView>(PENDING);
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
   const reload = useCallback(async () => {
     setState({ kind: "loading" });
     setSubmitError("");
     try {
-      const [project, queue] = await Promise.all([getProject(projectId), getQueue(projectId)]);
+      const current = viewRef.current;
+      const [project, queue] = await Promise.all([
+        getProject(projectId),
+        getQueue(projectId, current.status, current.offset),
+      ]);
       if (project.task_type !== taskType) {
         setState({ kind: "error", message: wrongType });
         return;
@@ -84,7 +94,8 @@ export function useTaskQueue(
       setSubmitError("");
       try {
         await submitAnnotation(projectId, itemId, result);
-        const queue = await getQueue(projectId);
+        const current = viewRef.current;
+        const queue = await getQueue(projectId, current.status, current.offset);
         setState((current) => (current.kind === "ready" ? { ...current, queue } : current));
         return true;
       } catch (error) {
@@ -93,6 +104,26 @@ export function useTaskQueue(
       } finally {
         busy.current = false;
         setSubmitting(false);
+      }
+    },
+    [projectId],
+  );
+
+  /**
+   * Show another queue page without reloading the project: the pending
+   * queue, or the `offset`-th annotated item (for task types whose results
+   * stay editable).
+   */
+  const browse = useCallback(
+    async (next: QueueView): Promise<void> => {
+      setSubmitError("");
+      try {
+        const queue = await getQueue(projectId, next.status, next.offset);
+        setView(next);
+        viewRef.current = next;
+        setState((current) => (current.kind === "ready" ? { ...current, queue } : current));
+      } catch (error) {
+        setState({ kind: "error", message: message(error) });
       }
     },
     [projectId],
@@ -107,6 +138,8 @@ export function useTaskQueue(
     submit,
     submitting,
     submitError,
+    view,
+    browse,
   };
 }
 

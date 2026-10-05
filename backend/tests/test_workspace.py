@@ -20,6 +20,7 @@ IMAGE_TYPES = {
     "segmentation": {"categories": ["road", "building"]},
     "depth": {},
     "text_span": {"labels": ["PER", "LOC"]},
+    "polygon": {"categories": ["material"]},
 }
 
 
@@ -66,7 +67,8 @@ def test_empty_workspace_lists_nothing_and_creates_nothing(tmp_path):
 def test_task_types_describe_forms_in_ui_order(tmp_path):
     types = request(make_app(tmp_path), "GET", "/api/task-types").json()
     assert [item["type"] for item in types] == [
-        "classification", "captioning", "text_span", "detection", "segmentation", "depth", "reid",
+        "classification", "captioning", "text_span", "detection", "segmentation", "polygon",
+        "depth", "reid",
     ]
     detection = types[3]
     assert detection["import_modes"] == ["upload", "directory"]
@@ -539,6 +541,57 @@ def test_text_tasks_accept_utf8_documents_and_nothing_else(tmp_path):
     # Detection projects still take images only.
     create(app, "Boxes", "detection", {"categories": ["box"]})
     assert upload(app, "boxes", "a.txt", text).json()["detail"]["code"] == "unsupported_file"
+
+
+def test_polygon_project_takes_a_coco_prelabel_upload_and_reports_it(tmp_path):
+    app = make_app(tmp_path)
+    create(app, "Walls", "polygon", {"categories": ["material"], "prelabels": "prelabels.coco.json"})
+    detail = request(app, "GET", "/api/projects/walls").json()
+    assert detail["status"] == "invalid"
+    assert "prelabels file not found" in detail["summary"]["prelabel_error"]
+    assert request(app, "GET", "/api/projects/walls/queue").status_code == 422
+    # The project list stays usable while one project's prelabels are broken.
+    assert request(app, "GET", "/api/projects").json()[0]["status"] == "invalid"
+
+    assert upload(app, "walls", "wall.jpg", JPEG).status_code == 200
+    assert upload(app, "walls", "broken.json", b"{oops").json()["detail"]["code"] == "unsupported_file"
+    document = {
+        "images": [{"id": 1, "file_name": "wall.jpg", "width": 4, "height": 3, "site": "A"}],
+        "categories": [{"id": 1, "name": "material"}],
+        "annotations": [
+            {"id": 1, "image_id": 1, "category_id": 1, "iscrowd": 0,
+             "segmentation": [[0, 0, 4, 0, 4, 3]]},
+            {"id": 2, "image_id": 9, "category_id": 1, "segmentation": [[0, 0, 1, 0, 1, 1]]},
+        ],
+    }
+    response = upload(app, "walls", "prelabels.coco.json", json_bytes(document))
+    assert response.status_code == 200, response.text
+    detail = request(app, "GET", "/api/projects/walls").json()
+    assert detail["status"] == "reviewing"
+    assert detail["summary"]["prelabel_images"] == 1
+    assert detail["summary"]["prelabel_issue_count"] == 1
+    assert detail["summary"]["prelabel_issues"][0]["annotation_id"] == 2
+    item = request(app, "GET", "/api/projects/walls/queue").json()["items"]
+    assert [entry["image_path"] for entry in item] == ["wall.jpg"]
+    assert item[0]["source"] == "prelabel"
+
+    submitted = {"image_size": {"width": 4, "height": 3}, "base_revision": 0,
+                 "polygons": [{"category": "material", "points": [[0, 0], [4, 0], [4, 3]]}]}
+    saved = request(app, "POST", "/api/projects/walls/annotations",
+                    json={"item_id": item[0]["item_id"], "result": submitted})
+    assert saved.status_code == 200 and saved.json()["item"]["revision"] == 1
+    stale = request(app, "POST", "/api/projects/walls/annotations",
+                    json={"item_id": item[0]["item_id"], "result": {**submitted, "polygons": []}})
+    assert stale.status_code == 409
+    exported = request(app, "GET", "/api/projects/walls/export", params={"format": "coco"})
+    assert exported.status_code == 200
+    assert exported.json()["images"][0]["site"] == "A"
+
+
+def json_bytes(value) -> bytes:
+    import json
+
+    return json.dumps(value).encode("utf-8")
 
 
 def test_link_directory_is_confined_to_allowed_roots(tmp_path):

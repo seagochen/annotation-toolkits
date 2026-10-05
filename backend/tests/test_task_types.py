@@ -80,6 +80,7 @@ def test_default_registry_contains_reid():
         "segmentation",
         "depth",
         "text_span",
+        "polygon",
     )
 
 

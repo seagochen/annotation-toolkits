@@ -6,6 +6,7 @@ export const statusLabels: Record<string, string> = {
   needs_mining: "等待候选挖掘",
   reviewing: "标注中",
   reviewed: "已完成",
+  invalid: "配置错误",
 };
 
 export type TaskEntry = Readonly<{ label: string; path: string; action: string }>;
@@ -17,6 +18,7 @@ const TASK_ENTRIES = {
   text_span: { label: "文本片段标注", path: "spans", action: "开始片段标注" },
   detection: { label: "目标检测", path: "detect", action: "开始目标检测" },
   segmentation: { label: "图像分割", path: "segment", action: "开始图像分割" },
+  polygon: { label: "多边形标注", path: "polygon", action: "开始多边形标注" },
   depth: { label: "深度图修正", path: "depth", action: "开始深度图标注" },
 } as const satisfies Record<string, TaskEntry>;
 

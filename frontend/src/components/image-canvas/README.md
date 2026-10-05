@@ -42,8 +42,13 @@ type ImageCanvasLayer = {
 - #21 segmentation：polygon 与 raster preview 使用不同 layer，保证顺序明确。
   `raster-buffer.ts` 提供一张可原地绘制的 `Uint8ClampedArray`
   （`stampAt`/`strokeSegment`/`fillPolygon`，像素值即类别索引，0 为背景），
-  `polygon-tool.ts` 只管顶点增删/闭合的纯状态机；多边形闭合后由页面调用
+  `polygon-tool.ts` 是多边形的纯状态机；多边形闭合后由页面调用
   `fillPolygon` 落到同一张栅格里，后端只接收整图栅格，不理解多边形。
+- #41 polygon：多边形本身就是结果。`polygon-tool.ts` 另有顶点编辑的纯函数
+  （`pointerDownEdit`/`dragVertexTo`/`endVertexDrag`/`insertVertex`/
+  `deleteVertex`/`relabelPolygon`/`selectPolygon`/`hitTestVertex`/`hitTestEdge`/
+  `hitTestPolygon`，`createPolygons` 从存储的点列表建状态）；状态里的
+  `selectedId`/`selectedVertex`/`drag` 只在编辑时使用，分割页不受影响，也可直接复用。
 - 分割与深度共用 `raster-brush.ts`：`drawRaster` 把缓冲区画进图层，
   `useRasterBrush` 是画笔的指针状态机，页面只提供半径与每像素的 `apply`。
 - #22 depth：灰度 depth raster layer 设置所需 blend mode，brush 仍接收

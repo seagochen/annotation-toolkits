@@ -35,6 +35,7 @@ flowchart LR
 | `text_span` | 文本片段（实体/区间）标注，允许重叠与嵌套 | [`text_span_task.py`](backend/annotation_platform/text_span_task.py) |
 | `detection` | 目标检测框标注，COCO 兼容导出 | [`detection_task.py`](backend/annotation_platform/detection_task.py) |
 | `segmentation` | 图像分割（画笔 + 多边形），COCO 兼容导出 | [`segmentation_task.py`](backend/annotation_platform/segmentation_task.py) |
+| `polygon` | 可编辑多边形，COCO 预标导入、按版本修订已提交结果、标准 COCO 导出 | [`polygon_task.py`](backend/annotation_platform/polygon_task.py) |
 | `depth` | 深度图画笔标注 | [`depth_task.py`](backend/annotation_platform/depth_task.py) |
 
 > 以上任务类型均已端到端验证（单元测试 + 一次真实浏览器交互，见

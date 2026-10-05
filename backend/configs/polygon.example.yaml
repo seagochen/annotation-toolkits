@@ -1,0 +1,23 @@
+# Editable polygon annotation with optional COCO prelabels.
+# Paths are relative to this file.
+dataset: ./example-images
+
+# 1..N categories, decided by the project; their order is the COCO category_id.
+categories:
+  - material
+
+patterns:
+  - "**/*.jpg"
+  - "**/*.jpeg"
+  - "**/*.png"
+  - "**/*.webp"
+
+# Optional, read-only standard COCO polygon file inside the dataset. Images are
+# matched by `images[].file_name` (dataset-relative path), categories by name.
+# An image with any invalid annotation starts blank; every entry not loaded is
+# reported in the project status.
+prelabels: ./prelabels.coco.json
+
+# Must remain inside dataset. The JSON contains current polygons, their
+# revision numbers and the full edit history.
+annotations: .annotations/polygon.json

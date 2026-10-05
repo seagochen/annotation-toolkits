@@ -415,3 +415,9 @@ a.step-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Prelabel entries that were not loaded (project overview). */
+.table-scroll { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.issue-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.issue-table th { position: sticky; top: 0; padding: 8px 10px; background: var(--surface); color: var(--muted); font-weight: 650; text-align: left; }
+.issue-table td { padding: 7px 10px; border-top: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }

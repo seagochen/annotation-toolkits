@@ -44,7 +44,7 @@
 | `/projects/:id/import` | 导入数据：上传文件/文件夹/ZIP（托管目录，可接受的扩展名来自 `upload_extensions`），或关联服务器目录 |
 | `/projects/:id/settings` | 属性：字段表单、直接编辑配置文件、删除项目 |
 | `/projects/:id/export` | 导出：按任务类型可用的格式下载 |
-| `/projects/:id/classify` 等 | 标注页面（`/classify`、`/caption`、`/spans`、`/detect`、`/segment`、`/depth`、`/review`），全宽布局 |
+| `/projects/:id/classify` 等 | 标注页面（`/classify`、`/caption`、`/spans`、`/detect`、`/segment`、`/polygon`、`/depth`、`/review`），全宽布局 |
 
 属性表单不在前端硬编码字段：`SettingsForm` 按 `/api/task-types` 返回的 `fields`
 渲染，字段的 `lock`（已有标注后 `append_only`/`locked`）与 `server_only`（只读）
@@ -98,7 +98,7 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 |---|---|---|
 | `geometry.ts` / `shortcuts.ts` | 全部三个画布任务 | 视口缩放/平移的纯函数，快捷键绑定与冲突检测 |
 | `box-tool.ts` | 检测 | 创建/选中/移动/8 向 handle 缩放/删除检测框的纯函数状态机 |
-| `polygon-tool.ts` | 分割 | 顶点增删/闭合/撤销的纯状态机，只管矢量顶点 |
+| `polygon-tool.ts` | 分割 + 多边形 | 顶点绘制/闭合/撤销，以及顶点编辑：`pointerDownEdit`（按下时依次尝试抓顶点、在选中多边形的边上插入顶点、选中多边形、取消选中）、`dragVertexTo`（限制在图内）、`insertVertex`、`deleteVertex`（至少保留 3 点）、`relabelPolygon`、`hitTest*`，全部是纯函数，分割页可直接复用 |
 | `raster-brush.ts` | 分割 + 深度 | `drawRaster`（把栅格画进图层）与 `useRasterBrush`（画笔指针状态机：按下盖章、拖动连线、抬起结束），两页共用同一份实现 |
 | `raster-buffer.ts` | 分割 + 深度 | 可原地绘制的 `Uint8ClampedArray` 像素缓冲区：`stampAt`/`strokeSegment`（画笔）、`fillPolygon`（多边形栅格化）、`toBase64`（提交）、`loadFromImageElement`/`toImageData`（读取已有 PNG、渲染预览） |
 
@@ -137,6 +137,7 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 | 文本片段 | 拖选文本新建片段（当前标签）、`1`–`9` 选择标签（选中片段时改为该标签）、`Del`/`Backspace` 删除选中片段、`Esc` 取消选中 |
 | 检测 | `1`–`9` 选择类别（选中框时改为该类别）、`B` 绘制新框、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中 |
 | 分割 | `1`–`9` 选择类别、`B` 画笔、`E` 橡皮、`P` 多边形、`[`/`]` 画笔半径、`Enter` 闭合多边形、`Backspace` 撤销最后一点、`Esc` 放弃多边形 |
+| 多边形 | `1`–`9` 选择类别（选中多边形时改为该类别）、`P` 绘制新多边形/回到编辑、`Enter` 闭合、`Backspace` 绘制时撤销一点（编辑时同 Del）、`Del` 删除选中顶点（未选顶点时删除多边形）、`Esc` 放弃绘制/取消选中；拖动顶点移动，点击选中多边形的边插入顶点 |
 | 深度 | `1` 提高、`2` 降低、`X` 切换方向、`[`/`]` 画笔半径 |
 | ReID | `1` 同一人、`2` 不同人、`3` 不确定（按下即提交） |
 
@@ -153,3 +154,14 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 （最多叠 4 条）。`TextSpanReviewPage` 在 `mouseup` 时以"文档开头到选区端点"的
 `Range.toString().length` 求 UTF-16 偏移（不依赖段落结构），单击已标注文字选中
 最内层片段。
+
+## 8. 多边形标注（`tasks/polygon/`）
+
+`PolygonReviewPage` 以队列条目的 `polygons`（已提交结果或预标）初始化
+`polygon-tool.ts` 的状态，按条目的 `item_id` + `revision` + `source` 判断是否需要
+重新初始化。提交带上条目的 `revision` 作为 `base_revision`，409 时提示并提供
+"重新载入"。`useTaskQueue` 的 `browse({ status, offset })` 让页面在"待标注"与
+"已提交"之间切换并逐张翻页（`status=annotated&offset=N&limit=1`），于是已提交的
+结果可以再次修改、生成新版本。浏览器加载出的图片尺寸与预标/已保存结果的尺寸不一致
+时，侧栏提示（后端会拒绝这种提交）。项目概览页把 `summary.prelabel_issues` 渲染为
+"未加载的预标"表格。

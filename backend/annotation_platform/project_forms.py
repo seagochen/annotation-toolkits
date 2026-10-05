@@ -235,6 +235,34 @@ TASK_TYPE_SPECS: tuple[TaskTypeSpec, ...] = (
         ),
     ),
     TaskTypeSpec(
+        type="polygon",
+        label="多边形标注",
+        description="用可编辑的多边形勾勒每个区域，可从 COCO 预标开始逐张修正，导出标准 COCO。",
+        import_modes=("upload", "directory"),
+        upload_kinds=("image", "json"),
+        export_formats=(NATIVE, ExportFormat("coco", "COCO")),
+        fields=(
+            FieldSpec(
+                key="categories",
+                label="类别",
+                type="list",
+                required=True,
+                help="多边形类别列表，至少 1 个，顺序决定 COCO 导出的 category_id。"
+                "开始标注后只能在末尾追加。",
+                lock="append_only",
+            ),
+            FieldSpec(
+                key="prelabels",
+                label="COCO 预标文件",
+                type="text",
+                help="可选。数据集内一个标准 COCO 多边形 JSON 的相对路径（可在导入页上传），"
+                "例如 prelabels.coco.json；按 images[].file_name 匹配图片、按类别名匹配类别。"
+                "平台只读取它，不修改。",
+            ),
+            _patterns(DEFAULT_PATTERNS),
+        ),
+    ),
+    TaskTypeSpec(
         type="depth",
         label="深度图修正",
         description="在预先生成的灰度深度图上用画笔抬高或压低深度值。",

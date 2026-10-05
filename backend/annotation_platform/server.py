@@ -48,6 +48,7 @@ TASK_TYPE_ORDER = (
     "text_span",
     "detection",
     "segmentation",
+    "polygon",
     "depth",
     "reid",
 )

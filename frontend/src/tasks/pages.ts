@@ -5,6 +5,7 @@ import { CaptionReviewPage } from "./caption/CaptionReviewPage";
 import { ClassificationReviewPage } from "./classification/ClassificationReviewPage";
 import { DepthReviewPage } from "./depth/DepthReviewPage";
 import { DetectionReviewPage } from "./detection/DetectionReviewPage";
+import { PolygonReviewPage } from "./polygon/PolygonReviewPage";
 import { ReIDReviewPage } from "./reid/ReIDReviewPage";
 import { SegmentationReviewPage } from "./segmentation/SegmentationReviewPage";
 import { TextSpanReviewPage } from "./text-span/TextSpanReviewPage";
@@ -22,4 +23,5 @@ export const taskPages: Readonly<Record<TaskType, ComponentType>> = {
   segmentation: SegmentationReviewPage,
   depth: DepthReviewPage,
   text_span: TextSpanReviewPage,
+  polygon: PolygonReviewPage,
 };

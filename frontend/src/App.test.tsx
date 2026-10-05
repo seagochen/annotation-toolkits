@@ -745,6 +745,116 @@ describe("project pages", () => {
     getContext.mockRestore();
   });
 
+  it("starts a polygon item from its prelabel, edits it and submits the revision it started from", async () => {
+    class InstantImage {
+      onload: (() => void) | null = null;
+      naturalWidth = 100;
+      naturalHeight = 80;
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal("Image", InstantImage);
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const prelabelItem = {
+      item_id: "p1",
+      image_path: "wall.jpg",
+      revision: 0,
+      source: "prelabel",
+      image_size: { width: 100, height: 80 },
+      polygons: [
+        { category: "material", points: [[10, 10], [50, 10], [50, 50], [10, 50]] },
+        { category: "crack", points: [[60, 10], [90, 10], [75, 40]] },
+      ],
+    };
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "walls",
+          name: "Walls",
+          task_type: "polygon",
+          root: "/data/walls",
+          status: "reviewing",
+          summary: { categories: ["material", "crack"], total: 2, annotated: 1, pending: 1 },
+        }),
+      )
+      .mockResolvedValueOnce(response({ total: 1, offset: 0, limit: 1, items: [prelabelItem] }))
+      .mockResolvedValueOnce(
+        response({ detail: { code: "task_conflict", message: "polygon item 'p1' is at revision 1" } }, 409),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 1,
+          offset: 0,
+          limit: 1,
+          items: [{ ...prelabelItem, revision: 2, source: "annotation", polygons: [] }],
+        }),
+      );
+
+    renderAt("/projects/walls/polygon");
+    expect(await screen.findByText("初始内容：COCO 预标。")).toBeVisible();
+    expect(screen.getByRole("button", { name: /#1 material/ })).toBeVisible();
+    // Select the first polygon from the list, relabel it with the digit key, delete the second.
+    fireEvent.click(screen.getByRole("button", { name: /#1 material/ }));
+    fireEvent.keyDown(window, { key: "2" });
+    expect(screen.getByRole("button", { name: /#1 crack/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "删除多边形 #2" }));
+    const save = screen.getByRole("button", { name: "保存并继续" });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("at revision 1");
+    const request = fetchMock.mock.calls[2][0] as Request;
+    await expect(request.clone().json()).resolves.toEqual({
+      item_id: "p1",
+      result: {
+        image_size: { width: 100, height: 80 },
+        base_revision: 0,
+        polygons: [{ category: "crack", points: [[10, 10], [50, 10], [50, 50], [10, 50]] }],
+      },
+    });
+
+    // Browsing submitted results asks for the annotated queue.
+    fireEvent.click(screen.getByRole("button", { name: "已提交" }));
+    expect(await screen.findByText(/第 2 版/)).toBeVisible();
+    const browse = new URL((fetchMock.mock.calls[3][0] as Request).url);
+    expect(browse.searchParams.get("status")).toBe("annotated");
+    expect(browse.searchParams.get("offset")).toBe("0");
+    expect(screen.getByText("还没有多边形。该图没有目标时可直接保存。")).toBeVisible();
+    getContext.mockRestore();
+  });
+
+  it("lists every prelabel entry that was not loaded on the project overview", async () => {
+    fetchMock.mockResolvedValueOnce(
+      response({
+        id: "walls",
+        name: "Walls",
+        task_type: "polygon",
+        root: "/data/walls",
+        status: "reviewing",
+        summary: {
+          categories: ["material"],
+          prelabels: "/data/walls/prelabels.coco.json",
+          total: 3,
+          annotated: 0,
+          pending: 3,
+          prelabel_images: 1,
+          prelabel_issue_count: 2,
+          prelabel_issues: [
+            { file_name: "c.jpg", image_id: 3, annotation_id: 32, reason: "RLE segmentation is not supported" },
+            { file_name: null, image_id: 404, annotation_id: 99, reason: "annotation does not refer to an `images` entry" },
+          ],
+        },
+      }),
+    );
+    renderAt("/projects/walls");
+    const card = await screen.findByRole("article", { name: "未加载的预标" });
+    expect(within(card).getByRole("heading", { name: "未加载的预标（2 条）" })).toBeVisible();
+    expect(within(card).getAllByRole("row")).toHaveLength(3);
+    expect(within(card).getByText("RLE segmentation is not supported")).toBeVisible();
+    expect(screen.getByText("未加载的预标条目")).toBeVisible();
+  });
+
   it("submits a blank segmentation mask matching the loaded image size", async () => {
     class InstantImage {
       onload: (() => void) | null = null;

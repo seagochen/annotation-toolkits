@@ -683,7 +683,7 @@ projects:
 
 `TaskTypeRegistry` 在注册时要求小写唯一的 `type_name`，并检查上述五个方法是否可调用。
 内置注册表当前有 `reid`、`classification`、`captioning`、`detection`、`segmentation`、
-`depth`、`text_span` 等任务类型（`annotation_platform.task_types.default_task_types()`）；`reid`
+`depth`、`text_span`、`polygon` 等任务类型（`annotation_platform.task_types.default_task_types()`）；`reid`
 适配器复用现有 `Store` 的队列筛选与原子 CSV 写入、`Project.summary()` 状态和当前 pairs
 产物，没有复制 ReID 领域规则。各任务类型的标注数据模型与导出格式见
 [`../docs/detailed_design/70_外部接口.md`](../docs/detailed_design/70_外部接口.md)。

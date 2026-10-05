@@ -261,3 +261,9 @@ kbd {
   color: var(--danger);
 }
 .text-document-error p { margin: 6px 0 0; font-family: var(--mono); font-size: 0.85rem; overflow-wrap: anywhere; }
+
+/* Paging through submitted results (polygon). */
+.queue-pager { display: flex; gap: 8px; }
+.queue-pager button { flex: 1; }
+.queue-switch-standalone { max-width: 320px; margin: 16px auto 0; }
+.workspace-panel .inline-error { margin: 0; font-size: 0.8rem; }
