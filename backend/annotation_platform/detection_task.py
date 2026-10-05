@@ -8,6 +8,7 @@ from pathlib import Path
 
 from local_files import atomic_write_json
 
+from .export_contracts import coco_info
 from .image_dataset import (
     ImageTaskStore,
     ImageTaskType,
@@ -176,7 +177,12 @@ class DetectionStore(ImageTaskStore):
                     }
                 )
                 annotation_id += 1
-        return {"images": images, "categories": categories, "annotations": annotations}
+        return {
+            "info": coco_info("detection-coco"),
+            "images": images,
+            "categories": categories,
+            "annotations": annotations,
+        }
 
 
 class DetectionTaskType(ImageTaskType):

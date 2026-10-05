@@ -98,5 +98,16 @@ sequenceDiagram
 | `configs/*.yaml`、`pipeline/` | `backend/configs/*.yaml`、`backend/pipeline/` |
 | `python app.py serve` + 标准库 HTTP 页面 | 已移除，改用 `uvicorn annotation_platform.server:app --app-dir backend`（见根 [`README.md`](../../README.md) 快速开始） |
 
+**兼容性变化**（数据与命令行为本身不变的部分同样列出，便于确认无需迁移）：
+
+| 方面 | 变化 |
+|---|---|
+| 数据集文件 | 不变：`identities.csv`、`tracks.csv`、`pairs*.csv`、`review/v*/candidates.csv` 等格式与位置照旧，旧数据集可直接被 CLI 和平台读取 |
+| CLI 子命令 | 不变：`status`/`init`/`extract`/`mine`/`check`/`finalize`/`train`/`evaluate`/`purge-domain` 与 `--config`、`--set 节.键=值` 照旧，只是入口在 `backend/app.py`（或安装后的 `reid-annotation`） |
+| 审核界面 | 旧的 `serve` 子命令与标准库 HTTP 页面已移除；改在 React 平台中把数据集目录"关联"为 ReID 项目后审核（导入页 → 关联服务器目录） |
+| 后台动作 | 平台里的 `extract`/`mine`/`check`/`finalize`/`purge-domain`/`train` 动作调用的是同一组 CLI 阶段函数（`stages.py` 的 `STAGES`），产物与 CLI 相同（`finalize` 的逐字节一致由 `test_review_to_finalize_artifacts_match_cli` 验证）；`evaluate` 仍只在 CLI 提供 |
+| 导出 | 平台的 ReID 导出即当前 pairs 清单，契约 `reid-pairs-csv/v1`（见 [`70_外部接口.md`](70_外部接口.md)"导出契约"），与 CLI `finalize` 产出的文件相同；也可用 `python -m annotation_platform.exports check reid-pairs-csv/v1 <pairs.csv>` 校验 |
+| 环境变量 | 平台用 `ANNOTATION_WORKSPACE` 指定工作区（可直接指向旧的手写 `projects.yaml`），旧的 `ANNOTATION_PROJECTS_CONFIG` 已不再读取 |
+
 `reid.yaml` 内部字段的迁移（旧版一长串 CLI flag、`train:` 节里训练器专属超参的
 搬迁）已经写在 `backend/README.md` 对应小节，不在此重复。

@@ -17,6 +17,7 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Literal, Mapping
 
+from .export_contracts import contract_for
 from .file_kinds import KIND_SUFFIXES
 from .image_dataset import DEFAULT_PATTERNS
 from .text_span_task import DEFAULT_PATTERNS as TEXT_SPAN_PATTERNS
@@ -454,9 +455,19 @@ def describe_spec(spec: TaskTypeSpec) -> dict:
         "description": spec.description,
         "import_modes": list(spec.import_modes),
         "upload_extensions": sorted(spec.upload_suffixes()) if "upload" in spec.import_modes else [],
-        "export_formats": [asdict(item) for item in spec.export_formats],
+        "export_formats": [
+            {**asdict(item), "contract": _contract_id(spec.type, item.format)}
+            for item in spec.export_formats
+        ],
         "fields": [describe_field(item) for item in spec.fields],
     }
+
+
+def _contract_id(task_type: str, export_format: str) -> str:
+    contract = contract_for(task_type, export_format)
+    if contract is None:
+        raise RuntimeError(f"{task_type} export format {export_format!r} has no contract")
+    return contract.id
 
 
 def describe_field(spec: FieldSpec) -> dict:

@@ -34,6 +34,7 @@ import yaml
 from local_files import atomic_write_bytes, file_lock
 from reid_annotation_tool.config import ConfigError as ReIDConfigError
 
+from .export_contracts import ContractViolation, contract_for
 from .file_kinds import IMAGE_SUFFIXES, has_kind_content, kind_of
 from .project_forms import (
     MODEL_PATH_KEYS,
@@ -181,6 +182,8 @@ class ExportDownload:
     # True when `path` is a zip built for this response and must be removed
     # once it has been sent.
     temporary: bool
+    # The export contract the files were validated against ("detection-coco/v1").
+    contract: str
 
 
 class Workspace:
@@ -557,10 +560,28 @@ class Workspace:
         missing = [str(path) for path in artifacts if not path.is_file()]
         if missing:
             raise ManagementError("export_failed", f"export artifacts are missing: {missing}")
+        contract = contract_for(entry.task_type, export_format)
+        if contract is None or contract.name != result.format:
+            raise ManagementError(
+                "export_failed",
+                f"{entry.task_type} export {export_format!r} has no registered contract",
+                status=500,
+            )
+        # Nothing leaves the platform that does not match its documented contract.
+        try:
+            contract.validate(artifacts)
+        except ContractViolation as error:
+            raise ManagementError(
+                "export_invalid", f"export does not match {contract.id}: {error}", status=500
+            ) from error
         stem = f"{entry.id}-{export_format}"
         if len(artifacts) == 1:
-            return ExportDownload(artifacts[0], stem + artifacts[0].suffix, temporary=False)
-        return ExportDownload(_zip(artifacts, entry.project.root), stem + ".zip", temporary=True)
+            return ExportDownload(
+                artifacts[0], stem + artifacts[0].suffix, temporary=False, contract=contract.id
+            )
+        return ExportDownload(
+            _zip(artifacts, entry.project.root), stem + ".zip", temporary=True, contract=contract.id
+        )
 
     # ------------------------------------------------------------ registry
 

@@ -93,7 +93,7 @@ export function ProjectExportPage() {
                 <span className="type-option-text">
                   <strong>{option.label}</strong>
                   <span>
-                    <code>{option.format}</code>
+                    <code>{option.format}</code> · 契约 <code title="导出文件已按此版本化契约校验">{option.contract}</code>
                   </span>
                 </span>
               </label>

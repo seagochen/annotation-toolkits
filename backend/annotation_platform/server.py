@@ -52,6 +52,8 @@ TASK_TYPE_ORDER = (
     "depth",
     "reid",
 )
+# Names the versioned contract a download was validated against.
+EXPORT_CONTRACT_HEADER = "X-Export-Contract"
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -143,6 +145,8 @@ class FieldSpec(BaseModel):
 class ExportFormatInfo(BaseModel):
     format: str
     label: str
+    # Versioned export contract, e.g. "detection-coco/v1".
+    contract: str
 
 
 class TaskTypeInfo(BaseModel):
@@ -283,6 +287,7 @@ def create_app(
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Content-Type"],
+        expose_headers=["Content-Disposition", EXPORT_CONTRACT_HEADER],
     )
 
     @application.get(
@@ -664,7 +669,12 @@ def _add_management_routes(application: FastAPI) -> None:
         cleanup = (
             BackgroundTask(download.path.unlink, missing_ok=True) if download.temporary else None
         )
-        return FileResponse(download.path, filename=download.filename, background=cleanup)
+        return FileResponse(
+            download.path,
+            filename=download.filename,
+            background=cleanup,
+            headers={EXPORT_CONTRACT_HEADER: download.contract},
+        )
 
 
 def _project_detail(entry: RegisteredProject) -> dict:

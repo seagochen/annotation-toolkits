@@ -108,6 +108,28 @@ python3 docker/build_and_run.py --data <dir> [--mount /abs/dataset/path ...]
 加 `--bind 127.0.0.1`。挂载、权限与 GPU 检查见
 [`90_部署与运维.md`](docs/detailed_design/90_部署与运维.md) §3。
 
+## 导出
+
+每个项目的"导出"页按任务类型提供格式（原生 JSON、CSV、COCO 等）。每种格式都有带
+版本号的导出契约（如 `polygon-coco/v1`），下载前会按契约校验。不经浏览器时用命令行
+做确定性导出与校验：
+
+```bash
+# 已 pip install -e backend；工作区取 ANNOTATION_WORKSPACE（或 --workspace）
+python -m annotation_platform.exports contracts                      # 列出全部契约
+python -m annotation_platform.exports export <project-id> --format coco --output out.json
+python -m annotation_platform.exports check polygon-coco/v1 out.json  # 校验任意来源的文件
+```
+
+各契约的字段、坐标/编码规则与示例见
+[`70_外部接口.md`](docs/detailed_design/70_外部接口.md)"导出契约"。
+
+### 从旧 ReID CLI 迁移
+
+原仓库根目录下的 ReID 工具已移到 `backend/`：CLI 子命令和数据集文件格式不变，
+旧的 `serve` 网页由本平台取代。路径、命令与兼容性变化的对照表见
+[`30_ReID流水线.md`](docs/detailed_design/30_ReID流水线.md) §5。
+
 ## 文档
 
 | 文档 | 内容 |
@@ -116,7 +138,7 @@ python3 docker/build_and_run.py --data <dir> [--mount /abs/dataset/path ...]
 | [`docs/requirements/`](docs/requirements/00_概述.md) | 需求分析书：目标、范围、需求与验收 |
 | [`docs/overall_design/`](docs/overall_design/00_概述.md) | 总体设计书：架构、职责、数据与部署边界 |
 | [`docs/detailed_design/`](docs/detailed_design/00_概述.md) | 详细设计书：模块契约与实现 |
-| [`docs/detailed_design/70_外部接口.md`](docs/detailed_design/70_外部接口.md) | HTTP API 与各任务类型的提交/导出格式 |
+| [`docs/detailed_design/70_外部接口.md`](docs/detailed_design/70_外部接口.md) | HTTP API、各任务类型的提交格式与版本化导出契约（含示例与校验命令） |
 | [`docs/detailed_design/80_配置参考.md`](docs/detailed_design/80_配置参考.md) | 配置项与环境变量参考 |
 | [`docs/detailed_design/90_部署与运维.md`](docs/detailed_design/90_部署与运维.md) | 安装、启动、打包、运维 |
 | [`backend/README.md`](backend/README.md) | ReID 深度操作手册（流水线接入、训练交接、低精度约束） |

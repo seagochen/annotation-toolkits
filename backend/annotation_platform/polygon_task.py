@@ -31,6 +31,7 @@ from pathlib import Path
 
 from local_files import atomic_write_json
 
+from .export_contracts import coco_info
 from .image_dataset import (
     ImageTaskStore,
     ImageTaskType,
@@ -535,6 +536,7 @@ class PolygonStore(ImageTaskStore):
                     }
                 )
         return {
+            "info": coco_info("polygon-coco"),
             "images": images,
             "annotations": annotations,
             "categories": [

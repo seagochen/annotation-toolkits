@@ -368,6 +368,8 @@ export interface components {
             format: string;
             /** Label */
             label: string;
+            /** Contract */
+            contract: string;
         };
         /** FieldOption */
         FieldOption: {

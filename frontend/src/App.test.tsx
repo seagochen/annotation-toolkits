@@ -38,7 +38,7 @@ const classificationType = {
   description: "为每张图像选择标签。",
   import_modes: ["upload", "directory"],
   upload_extensions: [".jpeg", ".jpg", ".md", ".png", ".txt", ".webp"],
-  export_formats: [{ format: "native", label: "原生 JSON" }],
+  export_formats: [{ format: "native", label: "原生 JSON", contract: "classification-json/v1" }],
   fields: [
     {
       key: "labels",
@@ -822,6 +822,24 @@ describe("project pages", () => {
     expect(browse.searchParams.get("offset")).toBe("0");
     expect(screen.getByText("还没有多边形。该图没有目标时可直接保存。")).toBeVisible();
     getContext.mockRestore();
+  });
+
+  it("shows the versioned contract of each export format", async () => {
+    fetchMock.mockResolvedValueOnce(response(streetProject)).mockResolvedValueOnce(
+      response([
+        {
+          ...classificationType,
+          export_formats: [
+            { format: "native", label: "原生 JSON", contract: "classification-json/v1" },
+            { format: "csv", label: "CSV", contract: "classification-csv/v1" },
+          ],
+        },
+      ]),
+    );
+    renderAt("/projects/street/export");
+    const formats = await screen.findByRole("radiogroup", { name: "导出格式" });
+    expect(within(formats).getByText("classification-json/v1")).toBeVisible();
+    expect(within(formats).getByText("classification-csv/v1")).toBeVisible();
   });
 
   it("lists every prelabel entry that was not loaded on the project overview", async () => {

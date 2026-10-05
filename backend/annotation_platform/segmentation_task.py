@@ -20,6 +20,7 @@ from pathlib import Path
 
 from local_files import atomic_write_bytes, atomic_write_json
 
+from .export_contracts import coco_info
 from .image_dataset import (
     ImageTaskStore,
     ImageTaskType,
@@ -188,7 +189,12 @@ class SegmentationStore(ImageTaskStore):
                     "segmentation_mask": saved["mask_path"],
                 }
             )
-        return {"images": images, "categories": categories, "annotations": annotations}
+        return {
+            "info": coco_info("segmentation-coco"),
+            "images": images,
+            "categories": categories,
+            "annotations": annotations,
+        }
 
 
 class SegmentationTaskType(ImageTaskType):
