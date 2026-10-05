@@ -7,6 +7,7 @@ import { DepthReviewPage } from "./depth/DepthReviewPage";
 import { DetectionReviewPage } from "./detection/DetectionReviewPage";
 import { ReIDReviewPage } from "./reid/ReIDReviewPage";
 import { SegmentationReviewPage } from "./segmentation/SegmentationReviewPage";
+import { TextSpanReviewPage } from "./text-span/TextSpanReviewPage";
 
 /**
  * The annotation page of each task type. Its route path comes from
@@ -20,4 +21,5 @@ export const taskPages: Readonly<Record<TaskType, ComponentType>> = {
   detection: DetectionReviewPage,
   segmentation: SegmentationReviewPage,
   depth: DepthReviewPage,
+  text_span: TextSpanReviewPage,
 };

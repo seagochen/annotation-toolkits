@@ -19,6 +19,7 @@ from typing import Literal, Mapping
 
 from .file_kinds import KIND_SUFFIXES
 from .image_dataset import DEFAULT_PATTERNS
+from .text_span_task import DEFAULT_PATTERNS as TEXT_SPAN_PATTERNS
 
 FieldType = Literal["text", "path", "integer", "number", "boolean", "select", "list"]
 LockRule = Literal["none", "append_only", "locked"]
@@ -173,6 +174,28 @@ TASK_TYPE_SPECS: tuple[TaskTypeSpec, ...] = (
         upload_kinds=("image", "text"),
         export_formats=(NATIVE, ExportFormat("csv", "CSV")),
         fields=(_patterns(DEFAULT_PATTERNS, TEXT_PATTERNS_HELP),),
+    ),
+    TaskTypeSpec(
+        type="text_span",
+        label="文本片段标注",
+        description="在文本中拖选片段并标上标签（实体、关键信息等），片段可以重叠或嵌套。",
+        import_modes=("upload", "directory"),
+        upload_kinds=("text",),
+        export_formats=(NATIVE,),
+        fields=(
+            FieldSpec(
+                key="labels",
+                label="标签",
+                type="list",
+                required=True,
+                help="片段可用的标签列表。开始标注后只能在末尾追加，不能删除或调整顺序。",
+                lock="append_only",
+            ),
+            _patterns(
+                TEXT_SPAN_PATTERNS,
+                "相对数据集根目录的 glob 模式，用于发现待标注的 UTF-8 文本文件。",
+            ),
+        ),
     ),
     TaskTypeSpec(
         type="detection",

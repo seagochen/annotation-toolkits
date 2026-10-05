@@ -603,6 +603,89 @@ describe("project pages", () => {
     expect(screen.getByRole("heading", { name: "文本生成" })).toBeVisible();
   });
 
+  it("creates overlapping text spans from DOM selections and submits code point offsets", async () => {
+    const text = "🎉张三在北京。";
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "news",
+          name: "News",
+          task_type: "text_span",
+          root: "/data/news",
+          status: "reviewing",
+          summary: { labels: ["PER", "LOC"], total: 1, annotated: 0, pending: 1 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          total: 1,
+          offset: 0,
+          limit: 1,
+          items: [{ item_id: "n1", image_path: "a.txt", media: "text", text, text_error: null, spans: [] }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          item: { item_id: "n1", image_path: "a.txt", length: 7, spans: [] },
+          status: { state: "reviewed", details: { pending: 0 } },
+        }),
+      )
+      .mockResolvedValueOnce(response({ total: 0, offset: 0, limit: 1, items: [] }));
+
+    renderAt("/projects/news/spans");
+    const article = await screen.findByRole("article", { name: "文本：a.txt" });
+    expect(article.textContent).toBe(text);
+
+    function select(from: number, to: number) {
+      // Offsets are UTF-16 positions in the rendered text, as a mouse drag gives.
+      const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT);
+      const nodes: Text[] = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+      const locate = (offset: number): [Text, number] => {
+        for (const node of nodes) {
+          if (offset <= node.length) return [node, offset];
+          offset -= node.length;
+        }
+        throw new Error("offset out of range");
+      };
+      const range = document.createRange();
+      range.setStart(...locate(from));
+      range.setEnd(...locate(to));
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      fireEvent.mouseUp(article.firstElementChild!);
+    }
+
+    // "张三在北京" with the selection catching the emoji's neighbour only.
+    select(2, 7);
+    expect(screen.getByRole("button", { name: /PER：张三在北京/ })).toBeVisible();
+    // A nested span with another label: deselect, choose LOC, select "北京".
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByRole("radio", { name: "LOC" }));
+    expect(screen.getByRole("button", { name: /PER：张三在北京/ })).toBeVisible();
+    select(5, 7);
+    expect(screen.getByRole("button", { name: /LOC：北京/ })).toBeVisible();
+    expect(article.querySelectorAll("mark").length).toBe(2);
+    // Relabel the selected (LOC) span to PER with the digit key, then back.
+    fireEvent.keyDown(window, { key: "1" });
+    expect(screen.getByRole("button", { name: /PER：北京/ })).toBeVisible();
+    fireEvent.keyDown(window, { key: "2" });
+    fireEvent.click(screen.getByRole("button", { name: "保存并继续" }));
+
+    expect(await screen.findByRole("heading", { name: "文本片段标注已完成" })).toBeVisible();
+    const request = fetchMock.mock.calls[2][0] as Request;
+    await expect(request.clone().json()).resolves.toEqual({
+      item_id: "n1",
+      result: {
+        spans: [
+          { start: 1, end: 6, label: "PER" },
+          { start: 4, end: 6, label: "LOC" },
+        ],
+      },
+    });
+  });
+
   it("loads image dimensions and submits an empty-box detection result", async () => {
     class InstantImage {
       onload: (() => void) | null = null;

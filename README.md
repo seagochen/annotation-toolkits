@@ -18,7 +18,7 @@ Label Studio 的项目、任务队列、标签配置和标注交互作为产品�
 ```mermaid
 flowchart LR
     Browser(["React 标注界面"]) -- "① HTTP" --> API["FastAPI 应用<br/>backend/annotation_platform/server.py"]
-    API -- "② 按 task_type 分发" --> Modules["六个任务类型模块<br/>backend/annotation_platform/*_task.py"]
+    API -- "② 按 task_type 分发" --> Modules["任务类型模块<br/>backend/annotation_platform/*_task.py"]
     Modules -- "③ 原子写入" --> Files[("本地 CSV / JSON / PNG")]
     Modules -. "reid 委托" .-> ReID["backend/reid_annotation_tool/"]
 ```
@@ -32,16 +32,17 @@ flowchart LR
 | `reid` | 数据抽取、候选挖掘、成对审核、逻辑冲突检测、数据定版、训练交接 | [`backend/reid_annotation_tool/`](backend/reid_annotation_tool/) |
 | `classification` | 图像或文本文档的单/多标签分类 | [`classification_task.py`](backend/annotation_platform/classification_task.py) |
 | `captioning` | 图像描述；文本文档的翻译、摘要等自由文本生成 | [`caption_task.py`](backend/annotation_platform/caption_task.py) |
+| `text_span` | 文本片段（实体/区间）标注，允许重叠与嵌套 | [`text_span_task.py`](backend/annotation_platform/text_span_task.py) |
 | `detection` | 目标检测框标注，COCO 兼容导出 | [`detection_task.py`](backend/annotation_platform/detection_task.py) |
 | `segmentation` | 图像分割（画笔 + 多边形），COCO 兼容导出 | [`segmentation_task.py`](backend/annotation_platform/segmentation_task.py) |
 | `depth` | 深度图画笔标注 | [`depth_task.py`](backend/annotation_platform/depth_task.py) |
 
-> 以上六种任务类型均已端到端验证（单元测试 + 一次真实浏览器交互，见
+> 以上任务类型均已端到端验证（单元测试 + 一次真实浏览器交互，见
 > [`docs/detailed_design/00_概述.md`](docs/detailed_design/00_概述.md) §16.1）。
 > 文本标注范围已在 [#20](https://github.com/seagochen/annotation-toolkits/issues/20)
 > 中决定：文档级分类/自由文本生成复用 `classification`/`captioning`（数据源由
 > `patterns` 决定，可以是 UTF-8 文本，[#39](https://github.com/seagochen/annotation-toolkits/issues/39)），
-> span/区间标注新增独立模块（[#40](https://github.com/seagochen/annotation-toolkits/issues/40)，尚未落地）。
+> span/区间标注新增独立模块 `text_span`（[#40](https://github.com/seagochen/annotation-toolkits/issues/40)）。
 
 ## 运行要件
 
@@ -123,7 +124,7 @@ python3 docker/build_and_run.py --data <dir> [--mount /abs/dataset/path ...]
 
 ```text
 backend/
-├── annotation_platform/   # 任务类型协议 + 六个内置模块 + FastAPI 应用
+├── annotation_platform/   # 任务类型协议 + 内置任务模块 + FastAPI 应用
 ├── reid_annotation_tool/  # ReID CLI 与流水线
 ├── local_files/           # 两个包共用的原子写入原语与路径锁
 ├── pipeline/              # 参考推理流水线

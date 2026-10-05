@@ -19,6 +19,7 @@ IMAGE_TYPES = {
     "detection": {"categories": ["person", "car"]},
     "segmentation": {"categories": ["road", "building"]},
     "depth": {},
+    "text_span": {"labels": ["PER", "LOC"]},
 }
 
 
@@ -65,9 +66,9 @@ def test_empty_workspace_lists_nothing_and_creates_nothing(tmp_path):
 def test_task_types_describe_forms_in_ui_order(tmp_path):
     types = request(make_app(tmp_path), "GET", "/api/task-types").json()
     assert [item["type"] for item in types] == [
-        "classification", "captioning", "detection", "segmentation", "depth", "reid",
+        "classification", "captioning", "text_span", "detection", "segmentation", "depth", "reid",
     ]
-    detection = types[2]
+    detection = types[3]
     assert detection["import_modes"] == ["upload", "directory"]
     assert [item["format"] for item in detection["export_formats"]] == ["native", "coco"]
     categories = detection["fields"][0]
@@ -86,7 +87,7 @@ def test_create_each_task_type_as_managed_project(tmp_path, task_type):
     response = create(app, f"Demo {task_type}", task_type, IMAGE_TYPES.get(task_type, {}))
     assert response.status_code == 201, response.text
     detail = response.json()
-    project_id = f"demo-{task_type}"
+    project_id = f"demo-{task_type}".replace("_", "-")
     project_dir = tmp_path / "ws" / "projects" / project_id
     assert detail["id"] == project_id
     assert detail["task_type"] == task_type

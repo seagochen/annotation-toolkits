@@ -224,6 +224,7 @@ def default_task_types() -> TaskTypeRegistry:
     from .depth_task import DepthTaskType
     from .reid_task import ReIDTaskType
     from .segmentation_task import SegmentationTaskType
+    from .text_span_task import TextSpanTaskType
 
     return TaskTypeRegistry(
         (
@@ -233,5 +234,6 @@ def default_task_types() -> TaskTypeRegistry:
             DetectionTaskType(),
             SegmentationTaskType(),
             DepthTaskType(),
+            TextSpanTaskType(),
         )
     )

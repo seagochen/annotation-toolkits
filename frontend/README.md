@@ -1,7 +1,7 @@
 # Annotation Toolkits Frontend
 
 本地多任务标注平台的 React/TypeScript 前端：左侧导航 + 右侧工作区，包含新建项目、
-项目 dashboard（概览、导入数据、属性、导出）、六种任务的标注页面，以及供检测、分割和
+项目 dashboard（概览、导入数据、属性、导出）、各任务类型的标注页面，以及供检测、分割和
 深度任务复用的图像画布原语。页面结构见
 [`docs/detailed_design/40_React前端.md`](../docs/detailed_design/40_React前端.md)。
 

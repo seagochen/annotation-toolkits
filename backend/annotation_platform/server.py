@@ -42,7 +42,15 @@ from .workspace import (
 )
 
 # The order the web UI offers task types in when creating a project.
-TASK_TYPE_ORDER = ("classification", "captioning", "detection", "segmentation", "depth", "reid")
+TASK_TYPE_ORDER = (
+    "classification",
+    "captioning",
+    "text_span",
+    "detection",
+    "segmentation",
+    "depth",
+    "reid",
+)
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",

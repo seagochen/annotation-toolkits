@@ -14,6 +14,7 @@ const TASK_ENTRIES = {
   reid: { label: "行人重识别", path: "review", action: "开始审核候选" },
   classification: { label: "分类", path: "classify", action: "开始分类" },
   captioning: { label: "描述 / 文本生成", path: "caption", action: "开始描述" },
+  text_span: { label: "文本片段标注", path: "spans", action: "开始片段标注" },
   detection: { label: "目标检测", path: "detect", action: "开始目标检测" },
   segmentation: { label: "图像分割", path: "segment", action: "开始图像分割" },
   depth: { label: "深度图修正", path: "depth", action: "开始深度图标注" },

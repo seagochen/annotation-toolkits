@@ -23,7 +23,7 @@
 
 ## 1. 职责
 
-把六种任务类型的标注交互统一到"读队列 → 在画布/表单里产出一个 `result` → 提交 →
+把各任务类型的标注交互统一到"读队列 → 在画布/表单里产出一个 `result` → 提交 →
 读下一条"这一个循环里，同时让检测/分割/深度三个基于画布的任务类型共享同一套坐标
 变换、图层合成和像素编辑图元，不各自维护一份。前端**不**做任何服务端已经做的
 校验重复实现——`result` 的合法性以后端 422/409 响应为准，前端校验只是提前拦截
@@ -41,10 +41,10 @@
 | （弹窗） | 选择标注任务类型，确认后进入 `/new/<type>` |
 | `/new/:taskType` | 新建项目属性页：名称 + 该任务类型的字段，创建后进入概览 |
 | `/projects/:id` | 概览（dashboard）：进度、下一步操作卡片、任务摘要；ReID 另有流水线动作 |
-| `/projects/:id/import` | 导入数据：上传图片/文件夹/ZIP（托管目录），或关联服务器目录 |
+| `/projects/:id/import` | 导入数据：上传文件/文件夹/ZIP（托管目录，可接受的扩展名来自 `upload_extensions`），或关联服务器目录 |
 | `/projects/:id/settings` | 属性：字段表单、直接编辑配置文件、删除项目 |
 | `/projects/:id/export` | 导出：按任务类型可用的格式下载 |
-| `/projects/:id/classify` 等 | 标注页面（`/classify`、`/caption`、`/detect`、`/segment`、`/depth`、`/review`），全宽布局 |
+| `/projects/:id/classify` 等 | 标注页面（`/classify`、`/caption`、`/spans`、`/detect`、`/segment`、`/depth`、`/review`），全宽布局 |
 
 属性表单不在前端硬编码字段：`SettingsForm` 按 `/api/task-types` 返回的 `fields`
 渲染，字段的 `lock`（已有标注后 `append_only`/`locked`）与 `server_only`（只读）
@@ -114,12 +114,12 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 
 ## 6. 标注工作台（`components/workspace/`）
 
-六个任务页（含 ReID 审核）都渲染同一个 `TaskWorkspace`：
+所有任务页（含 ReID 审核）都渲染同一个 `TaskWorkspace`：
 
 | 区域 | 内容 |
 |---|---|
 | 顶栏（工作区内） | 返回项目、任务名、当前文件名、进度条（`已完成 / 总数`）、剩余数（`.queue-count`） |
-| 舞台 | 画布或图片，占满工作区剩余高度，页面本身不滚动 |
+| 舞台 | 画布、图片或文本，占满工作区剩余高度，页面本身不滚动；文本条目（`media: "text"`）由 `tasks/ItemStage.tsx` 的 `TextDocument` 显示为可在舞台内滚动的文档（保留空白与换行），`text_error` 原样显示 |
 | 侧栏 | 类别/工具等面板（`PanelSection`、`OptionList`、`Segmented`、`RangeField`），可折叠的快捷键列表；底部固定 `SubmitBar`（保存按钮、禁用原因、保存失败与重试） |
 
 进度由 `project-meta.ts` 的 `summaryProgress()` 计算：图像任务取 `summary.total`，
@@ -134,11 +134,22 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 |---|---|
 | 全部（ReID 除外） | `Ctrl/⌘ + Enter` 保存并继续（描述页在输入框内也可用） |
 | 分类 | `1`–`9` 选择/切换第 N 个标签 |
+| 文本片段 | 拖选文本新建片段（当前标签）、`1`–`9` 选择标签（选中片段时改为该标签）、`Del`/`Backspace` 删除选中片段、`Esc` 取消选中 |
 | 检测 | `1`–`9` 选择类别（选中框时改为该类别）、`B` 绘制新框、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中 |
 | 分割 | `1`–`9` 选择类别、`B` 画笔、`E` 橡皮、`P` 多边形、`[`/`]` 画笔半径、`Enter` 闭合多边形、`Backspace` 撤销最后一点、`Esc` 放弃多边形 |
 | 深度 | `1` 提高、`2` 降低、`X` 切换方向、`[`/`]` 画笔半径 |
 | ReID | `1` 同一人、`2` 不同人、`3` 不确定（按下即提交） |
 
 **类别配色**：`palette.ts` 的 `categoryColor(index)` 按类别在项目配置中的顺序取色，
-检测框、分割掩膜与侧栏色块共用，保证画布与图例一致。分割掩膜值 `N` 对应第 `N` 个
+检测框、分割掩膜、文本片段与侧栏色块共用，保证画布与图例一致。分割掩膜值 `N` 对应第 `N` 个
 类别（`categoryColor(N - 1)`），`0` 为背景。
+
+## 7. 文本片段标注（`components/text-span/`、`tasks/text-span/`）
+
+`text-span.ts` 是纯函数（有单测）：`CodePointIndex` 在 UTF-16 下标与 code point 之间
+换算（后端 offset 为 code point）；`selectionToRange()` 把一次 DOM 选区换成去掉首尾
+空白的 code point 区间；`segmentText()` 在所有片段边界处切分文本，每段记录覆盖它的
+片段，于是重叠/嵌套片段渲染为：最内层片段着底色、每个覆盖片段各加一条彩色下划线
+（最多叠 4 条）。`TextSpanReviewPage` 在 `mouseup` 时以"文档开头到选区端点"的
+`Range.toString().length` 求 UTF-16 偏移（不依赖段落结构），单击已标注文字选中
+最内层片段。

@@ -79,6 +79,7 @@ def test_default_registry_contains_reid():
         "detection",
         "segmentation",
         "depth",
+        "text_span",
     )
 
 
