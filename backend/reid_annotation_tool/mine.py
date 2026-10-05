@@ -199,7 +199,7 @@ def mine(root: Path, args) -> dict:
                                row["candidate_id"]))
     report["kinds"] = dict(Counter(row["kind"] for row in rows))
     report["preserved_labels"] = sum(1 for row in rows if row["review_label"])
-    atomic_write_csv(destination / "candidates.csv", rows, CANDIDATE_FIELDS)
+    atomic_write_csv(destination / "candidates.csv", CANDIDATE_FIELDS, rows)
     atomic_write_json(destination / "report.json", report)
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
     print(f"candidates: {destination / 'candidates.csv'}", flush=True)

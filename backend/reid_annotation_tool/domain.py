@@ -48,7 +48,7 @@ def csv_fields(path: Path) -> list[str]:
 def archive_rows(path: Path, rows: list[dict], fields: list[str]) -> None:
     """Append to an archive CSV, keeping rows from earlier purge runs."""
     existing = read_csv(path) if path.is_file() else []
-    atomic_write_csv(path, existing + rows, fields)
+    atomic_write_csv(path, fields, existing + rows)
 
 
 def backup_once(source: Path, backup: Path) -> bool:
@@ -80,7 +80,7 @@ def purge_file(source: Path, archive: Path, backup: Path, apply: bool) -> dict:
     record["backup_created"] = backup_once(source, backup)
     archive_rows(archive, removed, fields)
     record["archive"] = str(archive)
-    atomic_write_csv(source, kept, fields)
+    atomic_write_csv(source, fields, kept)
     record["sha256_after"] = sha256(source)
     return record
 

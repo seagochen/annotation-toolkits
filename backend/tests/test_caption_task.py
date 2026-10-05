@@ -40,7 +40,7 @@ def test_queue_submission_reload_and_exports(tmp_path):
 
     reloaded = CaptionTaskType()
     reopened = reloaded.load(tmp_path / "caption.yaml")
-    captioned = reloaded.queue(reopened, QueueRequest(filters={"status": "captioned"}))
+    captioned = reloaded.queue(reopened, QueueRequest(filters={"status": "annotated"}))
     assert captioned.items[0]["caption"] == "一只猫在窗边。\n睡觉。"
     document = tmp_path / "images" / ".annotations" / "caption.json"
     state = json.loads(document.read_text(encoding="utf-8"))
@@ -113,3 +113,34 @@ def test_invalid_config_is_rejected(tmp_path, body, message):
     config.write_text(body, encoding="utf-8")
     with pytest.raises(TaskOperationError, match=message):
         CaptionTaskType().load(config)
+
+
+def test_text_documents_take_long_generated_text(tmp_path):
+    from annotation_platform.caption_task import MAX_GENERATED_TEXT_LENGTH
+
+    dataset = tmp_path / "docs"
+    dataset.mkdir()
+    (dataset / "article.txt").write_text("第一段。\n\n第二段。", encoding="utf-8")
+    (dataset / "photo.png").write_bytes(b"image")
+    config = tmp_path / "caption.yaml"
+    config.write_text(
+        "dataset: ./docs\npatterns: ['**/*.txt', '**/*.png']\n", encoding="utf-8"
+    )
+    module = CaptionTaskType()
+    project = module.load(config)
+    items = {item["image_path"]: item for item in module.queue(project, QueueRequest()).items}
+    assert items["article.txt"]["media"] == "text"
+    assert items["article.txt"]["text"] == "第一段。\n\n第二段。"
+    assert items["photo.png"]["media"] == "image"
+
+    summary = "摘要" * (MAX_CAPTION_LENGTH // 2 + 10)
+    saved = module.submit(project, Submission(items["article.txt"]["item_id"], {"caption": summary}))
+    assert saved.item["caption"] == summary
+    # An image caption keeps its own, shorter limit.
+    with pytest.raises(TaskOperationError, match=f"exceeds {MAX_CAPTION_LENGTH}"):
+        module.submit(project, Submission(items["photo.png"]["item_id"], {"caption": summary}))
+    with pytest.raises(TaskOperationError, match=f"exceeds {MAX_GENERATED_TEXT_LENGTH}"):
+        module.submit(
+            project,
+            Submission(items["article.txt"]["item_id"], {"caption": "x" * (MAX_GENERATED_TEXT_LENGTH + 1)}),
+        )

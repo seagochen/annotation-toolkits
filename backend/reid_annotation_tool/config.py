@@ -33,7 +33,7 @@ from types import SimpleNamespace
 
 import yaml
 
-from .core import atomic_write_text, read_csv
+from .core import read_csv
 
 CONFIG_NAMES = ("reid.yaml", "reid.yml", "reid-annotation.yaml")
 CONFIG_ENV = "REID_CONFIG"
@@ -223,36 +223,6 @@ def load(path: Path) -> "Project":
     return Project(path, resolve(path.parent, dataset), merged)
 
 
-def dump(dataset: str, sections: dict) -> str:
-    """Render project sections back to YAML.
-
-    Not comment-preserving -- PyYAML round-trips drop hand-written comments,
-    and every default fills in explicitly rather than staying implicit.
-    Saving from the web UI is an explicit, flagged trade-off (surfaced in the
-    UI); hand-edit the file directly when comments or brevity matter.
-    """
-    return yaml.dump({"dataset": dataset, **sections}, allow_unicode=True, sort_keys=False)
-
-
-def save(project: "Project", sections: dict) -> None:
-    """Validate a candidate set of sections before ever touching the real file.
-
-    Written to a scratch file first and loaded through the same `load()` this
-    tool trusts everywhere else: a rejected edit can never corrupt the live
-    config, because the live file is only replaced once the candidate passed.
-    """
-    raw = yaml.safe_load(project.path.read_text(encoding="utf-8")) or {}
-    dataset_value = raw.get("dataset", str(project.dataset))
-    text = dump(dataset_value, sections)
-    scratch = project.path.with_suffix(project.path.suffix + ".validate.tmp")
-    scratch.write_text(text, encoding="utf-8")
-    try:
-        load(scratch)
-    finally:
-        scratch.unlink(missing_ok=True)
-    atomic_write_text(project.path, text)
-
-
 def resolve(base: Path, value: str | Path) -> Path:
     """Relative paths are relative to the project file, never to the shell's cwd.
 
@@ -263,18 +233,29 @@ def resolve(base: Path, value: str | Path) -> Path:
     return path if path.is_absolute() else (base / path).resolve()
 
 
-def apply_override(sections: dict, override: str) -> None:
-    """``section.key=value`` from the command line, parsed as YAML scalar."""
+def parse_override(override: str, source: str = "--set") -> tuple[str, str, object]:
+    """Split one ``section.key=value`` override; the value is parsed as YAML.
+
+    The one parser for every override list: the CLI's ``--set`` and the
+    trainer/evaluator ``train.set``/``evaluate.set`` entries. ``source`` names
+    where the override came from, for the error message.
+    """
     name, _, rest = override.partition(".")
     key, _, raw = rest.partition("=")
-    if not name or not key or not rest.count("="):
-        raise ConfigError(f"--set expects section.key=value, got {override!r}")
+    if not name or not key or "=" not in rest:
+        raise ConfigError(f"{source} expects section.key=value, got {override!r}")
+    return name, key, yaml.safe_load(raw)
+
+
+def apply_override(sections: dict, override: str) -> None:
+    """``section.key=value`` from the command line, onto the project sections."""
+    name, key, value = parse_override(override)
     if name not in sections:
         raise ConfigError(f"--set: unknown section {name!r}")
     if name not in OPEN_SECTIONS and key not in DEFAULTS[name]:
         raise ConfigError(f"--set: unknown `{name}` key {key!r}"
                           + retired_hint(name, [key]))
-    sections[name][key] = yaml.safe_load(raw)
+    sections[name][key] = value
 
 
 class Project:

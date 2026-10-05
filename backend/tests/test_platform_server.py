@@ -8,6 +8,7 @@ import pytest
 
 from annotation_platform.server import create_app
 from annotation_platform.task_types import (
+    MAX_QUEUE_LIMIT,
     ExportRequest,
     ExportResult,
     QueuePage,
@@ -206,6 +207,51 @@ def test_cors_allows_only_configured_local_origin(tmp_path):
     assert "access-control-allow-origin" not in denied.headers
 
 
+def make_frontend_dist(tmp_path: Path) -> Path:
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<div id=root></div>", encoding="utf-8")
+    (dist / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("outside", encoding="utf-8")
+    return dist
+
+
+def test_frontend_build_is_served_next_to_the_api(tmp_path):
+    app = create_app(make_registry(tmp_path), frontend_dist=make_frontend_dist(tmp_path))
+
+    assert request(app, "GET", "/").text == "<div id=root></div>"
+    asset = request(app, "GET", "/assets/app.js")
+    assert asset.status_code == 200
+    assert asset.text == "console.log(1)"
+    # Client-side routes fall back to index.html so a reload does not 404.
+    route = request(app, "GET", "/projects/lobby/detect")
+    assert route.status_code == 200
+    assert route.text == "<div id=root></div>"
+    assert route.headers["cache-control"] == "no-cache"
+    assert request(app, "GET", "/assets/stale-hash.js").status_code == 404
+
+    assert request(app, "GET", "/api/projects").json()[0]["id"] == "lobby"
+    assert request(app, "GET", "/docs").status_code == 200
+    unknown_api = request(app, "GET", "/api/nope")
+    assert unknown_api.status_code == 404
+    assert unknown_api.json()["detail"]["code"] == "not_found"
+
+    escaped = request(app, "GET", "/..%2Fsecret.txt")
+    assert "outside" not in escaped.text
+
+    schema = request(app, "GET", "/openapi.json").json()
+    assert all(path.startswith("/api/") for path in schema["paths"])
+
+
+def test_frontend_is_not_served_unless_configured(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANNOTATION_FRONTEND_DIST", raising=False)
+    registry = make_registry(tmp_path)
+    assert request(create_app(registry), "GET", "/").status_code == 404
+
+    with pytest.raises(ValueError, match="frontend build not found"):
+        create_app(registry, frontend_dist=tmp_path / "missing")
+
+
 def test_wildcard_cors_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="must be explicit"):
         create_app(make_registry(tmp_path), cors_origins=["*"])
@@ -288,6 +334,40 @@ def test_review_queue_submit_refresh_and_duplicate_safety(tmp_path):
 
     refreshed = request(app, "GET", "/api/projects/lobby/queue?status=pending")
     assert refreshed.json()["total"] == 0
+
+
+def test_queue_passes_task_specific_filters_through_to_the_module(tmp_path):
+    registry, _ = make_review_registry(tmp_path)
+    reid = create_app(registry)
+    # `kind`/`split` are ReID's own filters; the platform only forwards them.
+    assert request(reid, "GET", "/api/projects/lobby/queue?kind=cross_track"
+                   "&split=train").json()["total"] == 1
+    assert request(reid, "GET", "/api/projects/lobby/queue?kind=track_purity"
+                   ).json()["total"] == 0
+
+    classification = create_app(make_classification_registry(tmp_path))
+    rejected = request(classification, "GET", "/api/projects/scenes/queue?kind=x")
+    assert rejected.status_code == 422
+    assert "unsupported classification filters: ['kind']" in rejected.json()[
+        "detail"]["message"]
+
+
+def test_queue_limit_has_one_upper_bound(tmp_path):
+    app = create_app(make_classification_registry(tmp_path))
+    assert request(app, "GET", f"/api/projects/scenes/queue?limit={MAX_QUEUE_LIMIT}"
+                   ).status_code == 200
+    assert request(app, "GET", f"/api/projects/scenes/queue?limit={MAX_QUEUE_LIMIT + 1}"
+                   ).status_code == 422
+    with pytest.raises(ValueError, match="between 1 and"):
+        QueueRequest(limit=MAX_QUEUE_LIMIT + 1)
+
+
+def test_project_detail_is_the_list_item_plus_summary(tmp_path):
+    app = create_app(make_classification_registry(tmp_path))
+    [item] = request(app, "GET", "/api/projects").json()
+    detail = request(app, "GET", "/api/projects/scenes").json()
+    assert {key: detail[key] for key in item} == item
+    assert set(detail) == set(item) | {"summary"}
 
 
 def test_review_rejects_bad_submission_without_changing_csv(tmp_path):

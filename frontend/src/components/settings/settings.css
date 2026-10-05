@@ -1,0 +1,87 @@
+.settings-form { display: grid; gap: 18px; }
+.form-group { display: grid; gap: 14px; min-width: 0; margin: 0; padding: 0; border: 0; }
+fieldset.form-group { padding-top: 14px; border-top: 1px solid var(--line); }
+.form-group legend, .form-group-collapsible summary { padding: 0; color: var(--muted); font-size: 0.72rem; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
+.form-group-collapsible { padding-top: 14px; border-top: 1px solid var(--line); }
+.form-group-collapsible summary { cursor: pointer; }
+.form-group-collapsible[open] summary { margin-bottom: 14px; }
+.form-group-collapsible > .form-field + .form-field { margin-top: 14px; }
+
+.form-field { display: grid; gap: 6px; }
+.form-field-inline { grid-template-columns: auto 1fr; align-items: center; }
+.form-field-inline .field-help { grid-column: 1 / -1; }
+.form-field label, .form-label { color: var(--ink); font-size: 0.86rem; font-weight: 650; }
+.required { color: var(--accent); }
+.form-field input[type="text"], .form-field input:not([type]), .form-field input[type="number"], .form-field select,
+.inline-form input, .danger-row input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--ink);
+  background: var(--surface-2);
+  font: inherit;
+  font-size: 0.9rem;
+}
+.form-field input:focus, .form-field select:focus, .inline-form input:focus, .danger-row input:focus, .code-editor:focus {
+  border-color: var(--brand-2);
+  outline: 3px solid rgba(49, 91, 71, 0.16);
+}
+.form-field input:disabled, .form-field select:disabled { color: var(--muted); background: var(--line); cursor: not-allowed; }
+.form-field input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--brand-2); }
+.mono, input.mono { font-family: var(--mono); font-size: 0.84rem; }
+.field-help { margin: 0; color: var(--muted); font-size: 0.78rem; line-height: 1.5; }
+.field-help code { margin-right: 6px; }
+.readonly-value { padding: 8px 11px; border-radius: 9px; background: var(--line); font: 0.84rem var(--mono); }
+
+.list-editor { display: grid; gap: 8px; }
+.list-entries { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+/* The number sits outside the box so the order reads separately from the name. */
+.list-entry { display: grid; grid-template-columns: 2.4em minmax(0, 1fr); align-items: center; column-gap: 6px; }
+.list-entry-index { color: var(--accent); font: 700 0.9rem var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.list-entry-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 4px 6px 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+.list-entry.dragging .list-entry-box { opacity: 0.45; }
+.list-entry.drop-before .list-entry-box { box-shadow: 0 -3px 0 var(--brand-2); }
+.list-entry.drop-after .list-entry-box { box-shadow: 0 3px 0 var(--brand-2); }
+.list-entry-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 0.92rem; }
+.form-field .list-entry-edit { flex: 1; min-width: 0; min-height: 30px; padding: 4px 8px; }
+.list-entry-error { grid-column: 2; margin-top: 2px; }
+.list-entry-locked { color: var(--muted); font-size: 0.75rem; }
+.list-entry-actions { display: flex; gap: 2px; }
+.list-icon-button { display: grid; width: 30px; height: 30px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; }
+.list-icon-button:hover { color: var(--ink); background: var(--line); }
+.list-icon-button.danger:hover { border-color: #e2b4a6; color: var(--danger); background: var(--danger-soft); }
+.list-icon-button.confirm { color: var(--brand-2); }
+.list-icon-button:disabled { cursor: default; opacity: 0.35; }
+.list-icon-button:disabled:hover { border-color: transparent; color: var(--muted); background: transparent; }
+.list-icon-button.handle { cursor: grab; }
+.list-icon-button.handle:active { cursor: grabbing; }
+.list-icon-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* Indented by the number column so the input lines up with the names. */
+.list-add { display: flex; gap: 8px; padding-left: calc(2.4em + 6px); }
+.form-field .list-add input { flex: 1; min-width: 0; }
+.list-error { margin: 0; color: var(--danger); font-size: 0.8rem; }
+.list-pending { margin: 0; color: #7a5b1f; font-size: 0.8rem; }
+.list-editor > .list-error, .list-editor > .list-pending { padding-left: calc(2.4em + 6px); }
+
+.code-editor {
+  width: 100%;
+  padding: 12px;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: #dce8df;
+  background: #17211b;
+  font: 0.82rem/1.55 var(--mono);
+  tab-size: 2;
+}

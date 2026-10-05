@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import json
-import os
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
+
+# Re-exported: ReID modules and site pipelines (backend/pipeline/) import the
+# atomic writers from here; the one implementation lives in `local_files`.
+from local_files import atomic_write_csv, atomic_write_json, atomic_write_text  # noqa: F401
 
 
 PAIR_FIELDS = ("img1", "img2", "label", "split", "evidence",
@@ -20,29 +22,6 @@ REVIEW_KINDS = {"cross_track", "track_purity", ""}
 def read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
-
-
-def atomic_write_csv(path: Path, rows: list[dict], fields) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    with temporary.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
-        handle.flush()
-        os.fsync(handle.fileno())
-    temporary.replace(path)
-
-
-def atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(text, encoding="utf-8")
-    temporary.replace(path)
-
-
-def atomic_write_json(path: Path, value: object) -> None:
-    atomic_write_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
 def sha256(path: Path) -> str:
@@ -161,7 +140,7 @@ def answer_key(row: dict) -> tuple:
 def supersede(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     """One answer per question: on one relation the newest round wins.
 
-    This is the dataset's correction rule (see revision.py), and it has to be
+    This is the dataset's correction rule, and it has to be
     applied wherever review rounds are merged. Without it a reviewer who
     revisits an old question and changes their mind does not correct the
     dataset — they contradict it, and the checks report a `direct_contradiction`
@@ -184,9 +163,6 @@ def supersede(rows: list[dict[str, str]]) -> list[dict[str, str]]:
 def load_reviews(paths: list[Path]) -> list[dict[str, str]]:
     """Read review rounds, oldest first, and keep one answer per question.
 
-    The conflict detail page deliberately does NOT come through here: "who
-    said what, when" is exactly the history this collapses, so provenance.py
-    reads the round files itself.
     """
     rows = []
     for path in paths:
@@ -239,33 +215,6 @@ def build_constraints(base_rows: list[dict], review_rows: list[dict]):
         if graph.same(left, right)
     ]
     return graph, negatives, conflicts
-
-
-def dataset_status(root: Path, base_pairs: Path, reviews: list[Path]) -> dict:
-    base_rows = read_csv(base_pairs)
-    review_rows = load_reviews(reviews)
-    _, _, conflicts = build_constraints(base_rows, review_rows)
-    labels = Counter(row["review_label"] or "pending" for row in review_rows)
-    kinds = Counter(f"{row.get('kind', 'cross_track')}:"
-                    f"{row['review_label'] or 'pending'}" for row in review_rows)
-    pairs = Counter((row["split"], int(row["label"])) for row in base_rows)
-    return {
-        "schema": 1,
-        "dataset_root": str(root),
-        "base_pairs": str(base_pairs),
-        "base_pairs_sha256": sha256(base_pairs),
-        "review_files": [str(path) for path in reviews],
-        "review_labels": dict(sorted(labels.items())),
-        "review_kinds": dict(sorted(kinds.items())),
-        "pending_reviews": labels.get("pending", 0),
-        "graph_conflicts": len(conflicts),
-        "conflicts": conflicts,
-        "contaminated_tracks": sorted(contaminated_tracks(review_rows)),
-        "pair_counts": {
-            split: {"positive": pairs[(split, 1)], "negative": pairs[(split, 0)]}
-            for split in ("train", "val", "test")
-        },
-    }
 
 
 def representative_images(root: Path) -> dict[str, str]:
@@ -356,7 +305,7 @@ def finalize_reviews(root: Path, base_pairs: Path, reviews: list[Path],
     for split in protected:
         if canonical_split(output_rows, split) != canonical_split(base_rows, split):
             raise AssertionError(f"Protected split changed: {split}")
-    atomic_write_csv(output, output_rows, PAIR_FIELDS)
+    atomic_write_csv(output, PAIR_FIELDS, output_rows)
     report = {
         "schema": 1, "base_pairs": str(base_pairs),
         "base_pairs_sha256": sha256(base_pairs), "output": str(output),

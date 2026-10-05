@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from reid_annotation_tool.core import (
-    PAIR_FIELDS, build_constraints, dataset_status, finalize_reviews,
+    PAIR_FIELDS, build_constraints, finalize_reviews,
     load_reviews, read_csv,
 )
 
@@ -89,17 +89,6 @@ def test_train_pending_is_blocked_and_protected_review_is_skipped(tmp_path):
               [review("c3", "a", "b", "", split="test")])
     finalize_reviews(tmp_path, tmp_path / "pairs.csv", [tmp_path / "protected.csv"],
                      tmp_path / "out.csv", tmp_path / "out.json")
-
-
-def test_status_counts_labels_and_conflicts(tmp_path):
-    make_dataset(tmp_path)
-    fields = ("candidate_id", "split", "person_id1", "person_id2",
-              "time_gap_sec", "review_label", "review_notes")
-    write_csv(tmp_path / "review.csv", fields,
-              [review("c1", "a", "b", "same"), review("c2", "b", "c", "unclear")])
-    value = dataset_status(tmp_path, tmp_path / "pairs.csv", [tmp_path / "review.csv"])
-    assert value["review_labels"] == {"same": 1, "unclear": 1}
-    assert value["graph_conflicts"] == 0
 
 
 def purity(candidate, identity, label, split="train"):

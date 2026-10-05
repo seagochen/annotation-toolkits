@@ -1,4 +1,12 @@
-"""Small atomic file primitives shared by local task modules."""
+"""Atomic file writes and per-path locks shared by every backend package.
+
+The one implementation used by both ``annotation_platform`` and
+``reid_annotation_tool`` (which re-exports it from ``core``). Each write goes to
+a sibling ``.tmp`` file, is flushed and fsynced, then replaces the target; on
+any failure the temporary file is removed, so readers only ever see the old or
+the new content. ``file_lock`` hands out one process-wide ``RLock`` per
+resolved path, so every writer of the same file shares the same lock.
+"""
 
 from __future__ import annotations
 
@@ -20,8 +28,11 @@ def file_lock(path: Path) -> threading.RLock:
 
 
 def atomic_write_json(path: Path, value: object) -> None:
-    payload = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
-    atomic_write_bytes(path, payload.encode("utf-8"))
+    atomic_write_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    atomic_write_bytes(path, text.encode("utf-8"))
 
 
 def atomic_write_csv(

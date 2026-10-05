@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from reid_annotation_tool.project_registry import ProjectRegistry, RegistryError
+from annotation_platform.project_registry import ProjectRegistry, ProjectRegistryError
 
 
 def project_config(path: Path, dataset: str = "./dataset") -> Path:
@@ -55,7 +55,7 @@ def test_list_and_load_projects_reuse_project_config_paths(tmp_path):
             "status": "missing",
         },
     ]
-    assert registry.load_project("one").path == first
+    assert registry.get_entry("one").project.value.path == first
 
 
 def test_directory_registry_uses_each_entry_as_its_relative_path_base(tmp_path):
@@ -70,7 +70,7 @@ def test_directory_registry_uses_each_entry_as_its_relative_path_base(tmp_path):
         encoding="utf-8",
     )
     registry = ProjectRegistry.load(entries)
-    assert registry.load_project("scene").path == config
+    assert registry.get_entry("scene").project.value.path == config
 
 
 @pytest.mark.parametrize(
@@ -88,14 +88,14 @@ def test_directory_registry_uses_each_entry_as_its_relative_path_base(tmp_path):
 def test_invalid_registry_entries_are_rejected(tmp_path, entries, message):
     project_config(tmp_path / "one.yaml", "./one-dataset")
     project_config(tmp_path / "two.yaml", "./two-dataset")
-    with pytest.raises(RegistryError, match=message):
+    with pytest.raises(ProjectRegistryError, match=message):
         ProjectRegistry.load(registry_file(tmp_path / "projects.yaml", entries))
 
 
 def test_duplicate_and_non_directory_roots_are_rejected(tmp_path):
     project_config(tmp_path / "one.yaml", "./shared")
     project_config(tmp_path / "two.yaml", "./shared")
-    with pytest.raises(RegistryError, match="share dataset root"):
+    with pytest.raises(ProjectRegistryError, match="share dataset root"):
         ProjectRegistry.load(
             registry_file(
                 tmp_path / "projects.yaml",
@@ -106,7 +106,7 @@ def test_duplicate_and_non_directory_roots_are_rejected(tmp_path):
     invalid_root = tmp_path / "not-a-directory"
     invalid_root.write_text("data", encoding="utf-8")
     project_config(tmp_path / "invalid.yaml", "./not-a-directory")
-    with pytest.raises(RegistryError, match="dataset root is not a directory"):
+    with pytest.raises(ProjectRegistryError, match="dataset root is not a directory"):
         ProjectRegistry.load(
             registry_file(
                 tmp_path / "invalid-projects.yaml",
@@ -120,9 +120,9 @@ def test_unknown_project_and_malformed_registry_have_stable_errors(tmp_path):
     registry = ProjectRegistry.load(
         registry_file(tmp_path / "projects.yaml", entry("one", "One", "./one.yaml"))
     )
-    with pytest.raises(RegistryError, match="unknown project 'missing'"):
-        registry.load_project("missing")
-    with pytest.raises(RegistryError, match="`projects` must be a list"):
+    with pytest.raises(ProjectRegistryError, match="unknown project 'missing'"):
+        registry.get_entry("missing")
+    with pytest.raises(ProjectRegistryError, match="`projects` must be a list"):
         ProjectRegistry.load(registry_file(tmp_path / "bad.yaml", "  key: value\n"))
 
 
@@ -130,7 +130,7 @@ def test_invalid_project_config_and_empty_directory_are_rejected(tmp_path):
     (tmp_path / "invalid.yaml").write_text(
         "pipeline:\n  script: tracking_csv\n", encoding="utf-8"
     )
-    with pytest.raises(RegistryError, match="invalid project config"):
+    with pytest.raises(ProjectRegistryError, match="invalid project config"):
         ProjectRegistry.load(
             registry_file(
                 tmp_path / "projects.yaml",
@@ -139,5 +139,5 @@ def test_invalid_project_config_and_empty_directory_are_rejected(tmp_path):
         )
     empty = tmp_path / "empty"
     empty.mkdir()
-    with pytest.raises(RegistryError, match="no project entry YAML files"):
+    with pytest.raises(ProjectRegistryError, match="no project entry YAML files"):
         ProjectRegistry.load(empty)

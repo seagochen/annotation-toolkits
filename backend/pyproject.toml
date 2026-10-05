@@ -28,9 +28,10 @@ test = ["httpx>=0.27", "pytest>=8", "Pillow>=10"]
 
 [project.scripts]
 reid-annotation = "reid_annotation_tool.app:main"
+annotation-export = "annotation_platform.exports:main"
 
 [tool.setuptools.packages.find]
-include = ["annotation_platform*", "reid_annotation_tool*"]
+include = ["annotation_platform*", "local_files*", "reid_annotation_tool*"]
 
 [tool.setuptools.package-data]
 reid_annotation_tool = ["pipelines/*.py"]

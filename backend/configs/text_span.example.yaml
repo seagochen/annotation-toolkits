@@ -1,0 +1,17 @@
+# Span (entity / interval) annotation over UTF-8 text documents.
+# Paths are relative to this file.
+dataset: ./example-texts
+
+# Labels a span can carry. Spans may overlap, nest and cross paragraphs.
+labels:
+  - PERSON
+  - ORG
+  - LOCATION
+
+# Every matched file is one item, read as UTF-8 text. Offsets in the results
+# count Unicode code points of the decoded text (BOM dropped, line endings kept).
+patterns:
+  - "**/*.txt"
+
+# Must remain inside dataset. The JSON contains current spans and history.
+annotations: .annotations/text_span.json

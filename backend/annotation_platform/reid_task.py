@@ -10,8 +10,13 @@ from reid_annotation_tool import config as reid_config
 from reid_annotation_tool.app import latest_pairs
 from reid_annotation_tool.jobs import Job, JobBusyError, JobRunner
 from reid_annotation_tool.review_store import LabelConflictError, Store
+from reid_annotation_tool.stages import BOOLEAN_OPTIONS, PLATFORM_ACTIONS
 
 from .task_types import (
+    STATUS_EMPTY,
+    STATUS_MISSING,
+    STATUS_REVIEWED,
+    STATUS_REVIEWING,
     ActionRecord,
     ActionRequest,
     ExportRequest,
@@ -26,15 +31,8 @@ from .task_types import (
     TaskStatus,
 )
 
-REID_ACTIONS = ("extract", "mine", "check", "finalize", "purge-domain", "train")
-ACTION_OPTIONS = {
-    "extract": frozenset(),
-    "mine": frozenset(),
-    "check": frozenset({"strict", "json"}),
-    "finalize": frozenset(),
-    "purge-domain": frozenset({"apply"}),
-    "train": frozenset({"dry_run"}),
-}
+# ReID-only state: a dataset exists but `mine` has not produced a round yet.
+STATUS_NEEDS_MINING = "needs_mining"
 
 
 class ReIDTaskType:
@@ -43,6 +41,8 @@ class ReIDTaskType:
     def __init__(self) -> None:
         self._runners: dict[Path, JobRunner] = {}
         self._runners_lock = threading.Lock()
+        self._stores: dict[tuple[Path, Path | None], Store] = {}
+        self._stores_lock = threading.Lock()
 
     @staticmethod
     def _project(project: TaskProject) -> reid_config.Project:
@@ -61,14 +61,23 @@ class ReIDTaskType:
             )
         return TaskProject(project.path, project.dataset, project)
 
-    @staticmethod
-    def _store(project: reid_config.Project) -> Store:
-        return Store(
-            project.dataset,
-            project.live_round(),
-            project.base_pairs,
-            project.rounds(),
+    def _store(self, project: reid_config.Project) -> Store:
+        """One Store per live round, so its mtime caches survive across requests.
+
+        Keyed by the round file as well as the dataset: when ``mine`` opens a
+        new round, the next request gets a fresh Store for it.
+        """
+        candidates = project.live_round()
+        key = (
+            project.dataset.resolve(),
+            candidates.resolve() if candidates is not None else None,
         )
+        with self._stores_lock:
+            store = self._stores.get(key)
+            if store is None:
+                store = Store(project.dataset, candidates)
+                self._stores[key] = store
+            return store
 
     def queue(self, project: TaskProject, request: QueueRequest) -> QueuePage:
         selected = self._store(self._project(project)).queue(
@@ -77,7 +86,7 @@ class ReIDTaskType:
             status=request.filters.get("status", ""),
             search=request.filters.get("q", ""),
             offset=request.offset,
-            limit=min(request.limit, 200),
+            limit=request.limit,
         )
         return QueuePage(
             total=selected["total"],
@@ -117,13 +126,13 @@ class ReIDTaskType:
     def status(self, project: TaskProject) -> TaskStatus:
         summary = self._project(project).summary()
         if not summary["exists"]:
-            state = "missing"
+            state = STATUS_MISSING
         elif not summary["identities"]:
-            state = "empty"
+            state = STATUS_EMPTY
         elif not summary["live_round"]:
-            state = "needs_mining"
+            state = STATUS_NEEDS_MINING
         else:
-            state = "reviewing" if summary["pending"] else "reviewed"
+            state = STATUS_REVIEWING if summary["pending"] else STATUS_REVIEWED
         return TaskStatus(state=state, details=summary)
 
     def export(self, project: TaskProject, request: ExportRequest) -> ExportResult:
@@ -142,7 +151,7 @@ class ReIDTaskType:
         )
 
     def action_names(self) -> tuple[str, ...]:
-        return REID_ACTIONS
+        return tuple(PLATFORM_ACTIONS)
 
     def _runner(self, project: TaskProject) -> JobRunner:
         root = project.root.resolve()
@@ -170,9 +179,9 @@ class ReIDTaskType:
     def start_action(
         self, project: TaskProject, request: ActionRequest
     ) -> ActionRecord:
-        if request.name not in ACTION_OPTIONS:
+        if request.name not in PLATFORM_ACTIONS:
             raise TaskOperationError(f"unknown reid action {request.name!r}")
-        unknown = sorted(set(request.options) - ACTION_OPTIONS[request.name])
+        unknown = sorted(set(request.options) - PLATFORM_ACTIONS[request.name])
         if unknown:
             raise TaskOperationError(
                 f"unsupported options for {request.name!r}: {unknown}"
@@ -180,11 +189,10 @@ class ReIDTaskType:
         for key, value in request.options.items():
             if not isinstance(value, bool):
                 raise TaskOperationError(f"action option {key!r} must be boolean")
+        # Stage functions may read any boolean option, as they would from the
+        # CLI; the ones this action does not accept stay False.
         args = SimpleNamespace(
-            dry_run=bool(request.options.get("dry_run", False)),
-            apply=bool(request.options.get("apply", False)),
-            strict=bool(request.options.get("strict", False)),
-            json=bool(request.options.get("json", False)),
+            **{name: bool(request.options.get(name, False)) for name in BOOLEAN_OPTIONS}
         )
         try:
             job = self._runner(project).start(

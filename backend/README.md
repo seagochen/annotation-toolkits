@@ -65,8 +65,8 @@ conda create -n reid-annotation python=3.11 -y
 conda activate reid-annotation
 
 pip install -r requirements.txt        # 完整安装：extract + mine + ultralytics 参考流水线
-# 纯标注 / 审计机器只需要：
-#   pip install PyYAML
+# 只做标注 / 审计、不抽取视频的机器只需要核心依赖（FastAPI、PyYAML、uvicorn）：
+#   pip install -e .
 # 开发机 / 需要可编辑安装时：
 #   pip install -e '.[extract,ultralytics]'
 ```
@@ -431,7 +431,9 @@ React 工作台：
 - 快捷键 `1`、`2`、`3` 对应三种判定；
 - 保存失败会保留当前候选并允许幂等重试；不同判定不会静默覆盖已保存结果；
 - 每次标注都原子写回现有 `candidates.csv`，CLI 可直接读取；
-- 冲突详情与关系修订目前通过 `python app.py check` 和后续平台能力处理。
+- 平台不提供冲突详情页，也不能修改已保存的判定：冲突结果通过 `check` 动作（或
+  `python app.py check`）查看；要更正判定，让该候选在后续审核轮次中重新出现并作答，
+  合并时最新一轮的回答覆盖旧回答（`core.supersede`）。
 
 ## 4. 逻辑冲突检测
 
@@ -641,8 +643,10 @@ python app.py evaluate
 
 ## 配置文件
 
-平台可通过 `projects.yaml` 列出多个本地项目；注册表只保存平台元数据和项目配置路径，
-数据集根目录及任务参数仍由各自的 `reid.yaml` 管理：
+平台通过 `projects.yaml` 列出多个本地项目；注册表只保存平台元数据和项目配置路径，
+数据集根目录及任务参数仍由各自的 `reid.yaml` 管理。平台上的项目**只通过 Web 界面
+管理**：注册表和每个项目的配置都由服务端写在工作区（`ANNOTATION_WORKSPACE`）里，
+不需要手写；下面的格式供理解和服务端排障使用。格式如下：
 
 ```yaml
 projects:
@@ -652,11 +656,13 @@ projects:
     config: ./scene/reid.yaml
 ```
 
-注册表路径按 `projects.yaml` 所在目录解析。也可以传入一个目录，将其中每个
-`*.yaml`/`*.yml` 视为单独的项目条目。Python 层使用
-`ProjectRegistry.load(path).list_projects()` 和 `load_project(id)`；统一 HTTP 接口使用
-`GET /api/projects` 和 `GET /api/projects/{id}`。完整示例见
-`configs/projects.example.yaml`。
+注册表路径按 `projects.yaml` 所在目录解析。Python 层的 `ProjectRegistry.load()` 也可以
+传入一个目录，将其中每个 `*.yaml`/`*.yml` 视为单独的项目条目（HTTP 服务不使用这种
+形式：它把目录当作工作区，读写其中的 `projects.yaml`）。Python 层使用
+`annotation_platform.project_registry.ProjectRegistry.load(path)` 的 `list_projects()` 与
+`get_entry(id)`；HTTP 接口的项目
+列表、创建、属性修改、导入、导出与删除见
+`docs/detailed_design/70_外部接口.md`。完整示例见 `configs/projects.example.yaml`。
 
 ### 任务类型插件
 
@@ -677,7 +683,7 @@ projects:
 
 `TaskTypeRegistry` 在注册时要求小写唯一的 `type_name`，并检查上述五个方法是否可调用。
 内置注册表当前有 `reid`、`classification`、`captioning`、`detection`、`segmentation`、
-`depth` 六种任务类型（`annotation_platform.task_types.default_task_types()`）；`reid`
+`depth`、`text_span`、`polygon` 等任务类型（`annotation_platform.task_types.default_task_types()`）；`reid`
 适配器复用现有 `Store` 的队列筛选与原子 CSV 写入、`Project.summary()` 状态和当前 pairs
 产物，没有复制 ReID 领域规则。各任务类型的标注数据模型与导出格式见
 [`../docs/detailed_design/70_外部接口.md`](../docs/detailed_design/70_外部接口.md)。

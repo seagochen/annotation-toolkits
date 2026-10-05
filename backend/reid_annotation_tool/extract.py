@@ -131,7 +131,7 @@ def parse_start_time(path: Path, pattern: str, time_format: str,
     target = regex_target(path, source)
     match = re.search(pattern, target)
     if not match:
-        raise SystemExit(f"--timestamp-regex did not match {target}")
+        raise SystemExit(f"splits.timestamp_regex did not match {target}")
     return datetime.strptime("".join(match.groups()), time_format).timestamp()
 
 
@@ -141,10 +141,10 @@ def video_identifier(path: Path, pattern: str = "") -> str:
         return path.stem
     match = re.search(pattern, path.as_posix())
     if not match:
-        raise SystemExit(f"--video-id-regex did not match {path.as_posix()}")
+        raise SystemExit(f"splits.video_id_regex did not match {path.as_posix()}")
     values = [value for value in match.groups() if value is not None]
     if not values:
-        raise SystemExit("--video-id-regex must contain at least one capture group")
+        raise SystemExit("splits.video_id_regex must contain at least one capture group")
     return "-".join(values)
 
 
@@ -156,14 +156,14 @@ def parse_day_splits(values: list[str] | None) -> dict[str, str]:
             day, split = value.split("=", 1)
         except ValueError as error:
             raise ValueError(
-                f"invalid --day-split {value!r}; expected YYYYMMDD=train|val|test"
+                f"invalid splits.day_split entry {value!r}; expected YYYYMMDD=train|val|test"
             ) from error
         if not re.fullmatch(r"\d{8}", day) or split not in {"train", "val", "test"}:
             raise ValueError(
-                f"invalid --day-split {value!r}; expected YYYYMMDD=train|val|test"
+                f"invalid splits.day_split entry {value!r}; expected YYYYMMDD=train|val|test"
             )
         if day in result:
-            raise ValueError(f"duplicate --day-split date: {day}")
+            raise ValueError(f"duplicate splits.day_split date: {day}")
         result[day] = split
     return result
 
@@ -174,10 +174,10 @@ def video_split(video: str, start_epoch: float | None, fixed: str | None,
         return fixed
     if day_splits:
         if start_epoch is None:
-            raise SystemExit("--day-split requires --timestamp-regex")
+            raise SystemExit("splits.day_split requires splits.timestamp_regex")
         day = datetime.fromtimestamp(start_epoch).strftime("%Y%m%d")
         if day not in day_splits:
-            raise SystemExit(f"recording day {day} is absent from --day-split mapping")
+            raise SystemExit(f"recording day {day} is absent from the splits.day_split mapping")
         return day_splits[day]
     return assign_split(video, ratios, seed)
 
@@ -410,7 +410,7 @@ def close_stale(records: dict[int, TrackRecord], last_seen: dict[int, int],
     what makes its crops a closed set of same-track evidence, and a script that
     forgot to say so must not silently produce an open-ended identity. The
     threshold counts PROCESSED frames, so it means the same thing whatever
-    --frame-stride is set to.
+    extract.frame_stride is set to.
     """
     for track_id in [key for key, seen in last_seen.items() if processed - seen > gap]:
         last_seen.pop(track_id)
@@ -590,10 +590,10 @@ def extract(args) -> dict:
         "first_timestamp": f"{witness['timestamp']:.3f}",
     } for (left, right), witness in sorted(covisible.items())]
 
-    atomic_write_csv(args.out / "identities.csv", identities, IDENTITY_FIELDS)
-    atomic_write_csv(args.out / "pairs.csv", pairs, PAIR_FIELDS)
-    atomic_write_csv(args.out / "tracks.csv", tracks, TRACK_FIELDS)
-    atomic_write_csv(args.out / "covisibility.csv", covisible_rows, COVISIBLE_FIELDS)
+    atomic_write_csv(args.out / "identities.csv", IDENTITY_FIELDS, identities)
+    atomic_write_csv(args.out / "pairs.csv", PAIR_FIELDS, pairs)
+    atomic_write_csv(args.out / "tracks.csv", TRACK_FIELDS, tracks)
+    atomic_write_csv(args.out / "covisibility.csv", COVISIBLE_FIELDS, covisible_rows)
 
     counts = {split: {
         "identities": sum(row["split"] == split and row["status"] == "accepted" for row in tracks),

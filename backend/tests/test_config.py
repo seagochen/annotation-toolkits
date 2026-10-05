@@ -213,24 +213,3 @@ def test_the_config_can_be_named_by_directory_or_environment(tmp_path, monkeypat
 def test_a_directory_without_a_config_says_so(tmp_path):
     with pytest.raises(ConfigError, match="no reid.yaml in"):
         project_config.find(tmp_path)
-
-
-def test_save_writes_a_validated_edit_and_preserves_the_raw_dataset_string(tmp_path):
-    project = project_config.load(write(tmp_path))
-    project.sections["crops"]["min_blur"] = 42.0
-    project_config.save(project, project.sections)
-    reloaded = project_config.load(project.path)
-    assert reloaded.sections["crops"]["min_blur"] == 42.0
-    # `dataset: ./ds` in MINIMAL is relative; save() must not silently rewrite
-    # it to the resolved absolute path.
-    assert "dataset: ./ds" in project.path.read_text(encoding="utf-8")
-
-
-def test_save_rejects_an_invalid_edit_without_touching_the_live_file(tmp_path):
-    project = project_config.load(write(tmp_path))
-    original = project.path.read_text(encoding="utf-8")
-    project.sections["crops"]["not_a_real_key"] = 1
-    with pytest.raises(ConfigError, match="unknown `crops` keys"):
-        project_config.save(project, project.sections)
-    assert project.path.read_text(encoding="utf-8") == original
-    assert not project.path.with_suffix(".yaml.validate.tmp").exists()

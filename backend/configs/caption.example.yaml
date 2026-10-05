@@ -1,6 +1,9 @@
-# Per-image free-text captioning project. Paths are relative to this file.
+# Free-text captioning of images, or free-text generation (translation, summary)
+# for UTF-8 text documents. Paths are relative to this file.
 dataset: ./example-images
 
+# Files matched here are the items. Image extensions are shown as images;
+# any other matched file is read as a UTF-8 text document, e.g. "**/*.txt".
 patterns:
   - "**/*.jpg"
   - "**/*.jpeg"

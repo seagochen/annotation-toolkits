@@ -2,7 +2,7 @@
 
 Segmentation masks and depth-map edits are stored as real, viewable PNG
 files without pulling Pillow/numpy into the platform's runtime dependencies
-(the web app is pure standard library on purpose -- see requirements.txt).
+(see `docs/detailed_design/10_通用设计.md` §5).
 The platform never needs to decode an arbitrary PNG: callers that produced
 the raster already hold the raw pixel bytes, and the frontend decodes the
 served file natively via <img>/canvas. So only an encoder lives here.

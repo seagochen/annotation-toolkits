@@ -1,34 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "wouter";
+import { useState } from "react";
+import { useParams } from "wouter";
 
-import {
-  getProject,
-  getQueue,
-  projectFileUrl,
-  submitAnnotation,
-  type ProjectDetail,
-  type QueueResponse,
-} from "../../api/client";
-import { ErrorState, LoadingState } from "../../components/AsyncState";
+import { projectFileUrl } from "../../api/client";
+import { PanelSection, TaskWorkspace } from "../../components/workspace/TaskWorkspace";
+import { useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
+import { summaryProgress } from "../../project-meta";
+import { QueueFallback, itemText as text, useTaskQueue, type QueueItem } from "../useTaskQueue";
 
 type Verdict = "same" | "different" | "unclear";
-type QueueItem = QueueResponse["items"][number];
-type ReadyState = { project: ProjectDetail; queue: QueueResponse };
-type PageState =
-  | { kind: "loading" }
-  | ({ kind: "ready" } & ReadyState)
-  | { kind: "error"; message: string };
 
 const verdicts: { value: Verdict; key: string; label: string; hint: string }[] = [
   { value: "same", key: "1", label: "同一人", hint: "Same" },
   { value: "different", key: "2", label: "不同人", hint: "Different" },
   { value: "unclear", key: "3", label: "不确定", hint: "Unclear" },
 ];
-
-function text(item: QueueItem, key: string): string {
-  const value = item[key];
-  return value == null ? "" : String(value);
-}
 
 function gallery(item: QueueItem, side: 1 | 2): string[] {
   const value = item[`gallery${side}`];
@@ -73,157 +58,114 @@ function IdentityGallery({
 
 export function ReIDReviewPage() {
   const { projectId = "" } = useParams();
-  const [state, setState] = useState<PageState>({ kind: "loading" });
   const [notes, setNotes] = useState("");
-  const [submitting, setSubmitting] = useState<Verdict | null>(null);
-  const [submitFailure, setSubmitFailure] = useState<{
-    message: string;
-    verdict: Verdict;
-  } | null>(null);
+  // Which verdict is being saved, and which one failed (for "retry").
+  const [saving, setSaving] = useState<Verdict | null>(null);
+  const [failed, setFailed] = useState<Verdict | null>(null);
+  const queue = useTaskQueue(projectId, {
+    taskType: "reid",
+    wrongType: "该项目不是 ReID 审核任务。",
+    onLoad: () => setFailed(null),
+  });
+  const { ready, item, submitError } = queue;
 
-  const load = useCallback(async () => {
-    setState({ kind: "loading" });
-    setSubmitFailure(null);
-    try {
-      const [project, queue] = await Promise.all([
-        getProject(projectId),
-        getQueue(projectId),
-      ]);
-      if (project.task_type !== "reid") {
-        setState({ kind: "error", message: "该项目不是 ReID 审核任务。" });
-        return;
-      }
-      setState({ kind: "ready", project, queue });
-    } catch (error) {
-      setState({
-        kind: "error",
-        message: error instanceof Error ? error.message : "未知错误",
-      });
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const item = state.kind === "ready" ? state.queue.items[0] : undefined;
-  const submit = useCallback(
-    async (verdict: Verdict) => {
-      if (!item || submitting) return;
-      setSubmitting(verdict);
-      setSubmitFailure(null);
-      try {
-        await submitAnnotation(projectId, text(item, "candidate_id"), {
-          label: verdict,
-          notes,
-        });
-        const queue = await getQueue(projectId);
-        setState((current) =>
-          current.kind === "ready" ? { ...current, queue } : current,
-        );
-        setNotes("");
-      } catch (error) {
-        setSubmitFailure({
-          message: error instanceof Error ? error.message : "未知错误",
-          verdict,
-        });
-      } finally {
-        setSubmitting(null);
-      }
-    },
-    [item, notes, projectId, submitting],
-  );
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.matches("input, textarea, select") || submitting) return;
-      const verdict = verdicts.find((choice) => choice.key === event.key)?.value;
-      if (verdict) void submit(verdict);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [submit, submitting]);
-
-  if (state.kind === "loading") return <LoadingState>正在读取审核队列…</LoadingState>;
-  if (state.kind === "error") {
-    return <ErrorState message={state.message} onRetry={() => void load()} />;
+  async function submit(verdict: Verdict) {
+    if (!item || saving) return;
+    setSaving(verdict);
+    setFailed(null);
+    const saved = await queue.submit(text(item, "candidate_id"), { label: verdict, notes });
+    setSaving(null);
+    if (saved) setNotes("");
+    else setFailed(verdict);
   }
-  if (!item) {
+
+  const hotkeys: Hotkey[] = verdicts.map((choice) => ({
+    keys: [choice.key],
+    display: choice.key,
+    description: choice.label,
+    run: () => {
+      if (!saving) void submit(choice.value);
+    },
+  }));
+  useHotkeys(hotkeys, Boolean(item));
+
+  if (!ready || !item) {
     return (
-      <section className="state-panel review-complete">
-        <p className="eyebrow">Queue complete</p>
-        <h1>候选队列已完成</h1>
-        <p>当前没有待审核的候选。所有判定均已写入本地 CSV。</p>
-        <Link className="text-link" to={`/projects/${projectId}`}>
-          返回项目详情
-        </Link>
-      </section>
+      <QueueFallback
+        doneDescription="当前没有待审核的候选。所有判定均已写入本地 CSV。"
+        doneTitle="候选队列已完成"
+        loading="正在读取审核队列…"
+        projectId={projectId}
+        queue={queue}
+      />
     );
   }
 
   return (
-    <section className="review-workspace">
-      <div className="review-topbar">
-        <div>
-          <Link className="back-link" to={`/projects/${projectId}`}>
-            ← {state.project.name}
-          </Link>
-          <p className="eyebrow">ReID pair review</p>
-          <h1>这两段轨迹属于同一人吗？</h1>
-        </div>
-        <div className="queue-count">
-          <strong>{state.queue.total}</strong>
-          <span>条待审核</span>
-        </div>
-      </div>
-
-      <div className="comparison-grid">
-        <IdentityGallery item={item} projectId={projectId} side={1} />
-        <IdentityGallery item={item} projectId={projectId} side={2} />
-      </div>
-
-      <div className="review-controls">
-        <label htmlFor="review-notes">备注（可选）</label>
-        <textarea
-          disabled={submitting !== null}
-          id="review-notes"
-          onChange={(event) => setNotes(event.target.value)}
-          placeholder="记录遮挡、服装或时序等判断依据"
-          rows={2}
-          value={notes}
-        />
-        <div className="verdict-grid">
-          {verdicts.map((choice) => (
-            <button
-              className={`verdict verdict-${choice.value}`}
-              disabled={submitting !== null}
-              key={choice.value}
-              onClick={() => void submit(choice.value)}
-              type="button"
-            >
-              <kbd>{choice.key}</kbd>
-              <span>{submitting === choice.value ? "正在保存…" : choice.label}</span>
-              <small>{choice.hint}</small>
-            </button>
-          ))}
-        </div>
-        {submitFailure && (
-          <div className="submit-error" role="alert">
-            <span>保存失败：{submitFailure.message}</span>
-            <div>
+    <TaskWorkspace
+      footer={
+        <>
+          <div className="verdict-grid">
+            {verdicts.map((choice) => (
               <button
-                disabled={submitting !== null}
-                onClick={() => void submit(submitFailure.verdict)}
+                className={`verdict verdict-${choice.value}`}
+                disabled={saving !== null}
+                key={choice.value}
+                onClick={() => void submit(choice.value)}
                 type="button"
               >
-                重试保存
+                <kbd>{choice.key}</kbd>
+                <span>{saving === choice.value ? "正在保存…" : choice.label}</span>
+                <small>{choice.hint}</small>
               </button>
-              <button onClick={() => void load()} type="button">刷新队列</button>
-            </div>
+            ))}
           </div>
-        )}
-      </div>
-    </section>
+          {failed && submitError && (
+            <div className="submit-error" role="alert">
+              <span>保存失败：{submitError}</span>
+              <div>
+                <button
+                  disabled={saving !== null}
+                  onClick={() => void submit(failed)}
+                  type="button"
+                >
+                  重试保存
+                </button>
+                <button onClick={() => void queue.reload()} type="button">刷新队列</button>
+              </div>
+            </div>
+          )}
+        </>
+      }
+      hotkeys={hotkeys}
+      panel={
+        <PanelSection title="判定">
+          <p className="panel-note">两段轨迹是否属于同一人？对比服装、体型与时序后作答。</p>
+          <div className="review-controls">
+            <label htmlFor="review-notes">备注（可选）</label>
+            <textarea
+              disabled={saving !== null}
+              id="review-notes"
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="记录遮挡、服装或时序等判断依据"
+              rows={4}
+              value={notes}
+            />
+          </div>
+        </PanelSection>
+      }
+      progress={summaryProgress(ready.project.summary, ready.queue.total)}
+      projectId={projectId}
+      projectName={ready.project.name}
+      remaining={ready.queue.total}
+      stage={
+        <div className="comparison-grid">
+          <IdentityGallery item={item} projectId={projectId} side={1} />
+          <IdentityGallery item={item} projectId={projectId} side={2} />
+        </div>
+      }
+      title="ReID 成对审核"
+      unit="条"
+    />
   );
 }

@@ -1,4 +1,4 @@
-# Image-level classification project. Paths are relative to this file.
+# Classification of images or UTF-8 text documents. Paths are relative to this file.
 dataset: ./example-images
 
 # `single` requires exactly one label; `multi` accepts one or more labels.
@@ -7,6 +7,8 @@ labels:
   - indoor
   - outdoor
 
+# Files matched here are the items. Image extensions are shown as images;
+# any other matched file is read as a UTF-8 text document, e.g. "**/*.txt".
 patterns:
   - "**/*.jpg"
   - "**/*.jpeg"

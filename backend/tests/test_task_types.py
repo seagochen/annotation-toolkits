@@ -79,6 +79,8 @@ def test_default_registry_contains_reid():
         "detection",
         "segmentation",
         "depth",
+        "text_span",
+        "polygon",
     )
 
 
@@ -113,6 +115,40 @@ def test_reid_adapter_reuses_queue_submission_status_and_export(
     exported = module.export(project, ExportRequest())
     assert exported.format == "reid-pairs-csv"
     assert exported.artifacts == (dataset / "pairs.csv",)
+
+
+def test_reid_adapter_reuses_one_store_per_round(dataset, tmp_path, monkeypatch):
+    review = dataset / "review" / "v1" / "candidates.csv"
+    write_csv(review, CANDIDATE_FIELDS, [candidate("c1", "a", "b")])
+    config = tmp_path / "reid.yaml"
+    config.write_text(
+        f"dataset: {dataset}\npipeline:\n  script: tracking_csv\n",
+        encoding="utf-8",
+    )
+    module = ReIDTaskType()
+    project = module.load(config)
+    parsed = []
+
+    def counting_read_csv(path):
+        parsed.append(Path(path).name)
+        return read_csv(path)
+
+    monkeypatch.setattr("reid_annotation_tool.review_store.read_csv", counting_read_csv)
+    module.queue(project, QueueRequest())
+    module.queue(project, QueueRequest())
+    assert parsed.count("identities.csv") == 1
+    assert parsed.count("candidates.csv") == 1
+
+    # A label save rewrites candidates.csv, so the next page re-reads it.
+    module.submit(project, Submission("c1", {"label": "same"}))
+    page = module.queue(project, QueueRequest())
+    assert page.items[0]["review_label"] == "same"
+
+    # `mine` opening a new round is picked up by a fresh store.
+    newer = dataset / "review" / "v2" / "candidates.csv"
+    write_csv(newer, CANDIDATE_FIELDS, [candidate("c9", "c", "d")])
+    page = module.queue(project, QueueRequest())
+    assert [item["candidate_id"] for item in page.items] == ["c9"]
 
 
 def test_reid_adapter_rejects_invalid_submission_and_export(dataset, tmp_path):

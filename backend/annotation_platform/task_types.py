@@ -61,6 +61,10 @@ class TaskProject:
     value: object
 
 
+# Largest page any queue returns; the HTTP route and QueueRequest both use it.
+MAX_QUEUE_LIMIT = 200
+
+
 @dataclass(frozen=True)
 class QueueRequest:
     offset: int = 0
@@ -70,8 +74,8 @@ class QueueRequest:
     def __post_init__(self) -> None:
         if self.offset < 0:
             raise ValueError("queue offset must be non-negative")
-        if self.limit <= 0:
-            raise ValueError("queue limit must be positive")
+        if not 0 < self.limit <= MAX_QUEUE_LIMIT:
+            raise ValueError(f"queue limit must be between 1 and {MAX_QUEUE_LIMIT}")
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,15 @@ class Submission:
 class SubmissionResult:
     item: Mapping[str, object]
     status: "TaskStatus"
+
+
+# Project states shared by every task type (the frontend's statusLabels
+# translates the same words); a task may add its own, as ReID adds
+# STATUS_NEEDS_MINING.
+STATUS_MISSING = "missing"
+STATUS_EMPTY = "empty"
+STATUS_REVIEWING = "reviewing"
+STATUS_REVIEWED = "reviewed"
 
 
 @dataclass(frozen=True)
@@ -209,8 +222,10 @@ def default_task_types() -> TaskTypeRegistry:
     from .classification_task import ClassificationTaskType
     from .detection_task import DetectionTaskType
     from .depth_task import DepthTaskType
+    from .polygon_task import PolygonTaskType
     from .reid_task import ReIDTaskType
     from .segmentation_task import SegmentationTaskType
+    from .text_span_task import TextSpanTaskType
 
     return TaskTypeRegistry(
         (
@@ -220,5 +235,7 @@ def default_task_types() -> TaskTypeRegistry:
             DetectionTaskType(),
             SegmentationTaskType(),
             DepthTaskType(),
+            TextSpanTaskType(),
+            PolygonTaskType(),
         )
     )

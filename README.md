@@ -18,7 +18,7 @@ Label Studio 的项目、任务队列、标签配置和标注交互作为产品�
 ```mermaid
 flowchart LR
     Browser(["React 标注界面"]) -- "① HTTP" --> API["FastAPI 应用<br/>backend/annotation_platform/server.py"]
-    API -- "② 按 task_type 分发" --> Modules["六个任务类型模块<br/>backend/annotation_platform/*_task.py"]
+    API -- "② 按 task_type 分发" --> Modules["任务类型模块<br/>backend/annotation_platform/*_task.py"]
     Modules -- "③ 原子写入" --> Files[("本地 CSV / JSON / PNG")]
     Modules -. "reid 委托" .-> ReID["backend/reid_annotation_tool/"]
 ```
@@ -30,16 +30,20 @@ flowchart LR
 | 任务类型 | 功能 | 实现 |
 |---|---|---|
 | `reid` | 数据抽取、候选挖掘、成对审核、逻辑冲突检测、数据定版、训练交接 | [`backend/reid_annotation_tool/`](backend/reid_annotation_tool/) |
-| `classification` | 图像单/多标签分类 | [`classification_task.py`](backend/annotation_platform/classification_task.py) |
-| `captioning` | 图像自由文本描述 | [`caption_task.py`](backend/annotation_platform/caption_task.py) |
+| `classification` | 图像或文本文档的单/多标签分类 | [`classification_task.py`](backend/annotation_platform/classification_task.py) |
+| `captioning` | 图像描述；文本文档的翻译、摘要等自由文本生成 | [`caption_task.py`](backend/annotation_platform/caption_task.py) |
+| `text_span` | 文本片段（实体/区间）标注，允许重叠与嵌套 | [`text_span_task.py`](backend/annotation_platform/text_span_task.py) |
 | `detection` | 目标检测框标注，COCO 兼容导出 | [`detection_task.py`](backend/annotation_platform/detection_task.py) |
 | `segmentation` | 图像分割（画笔 + 多边形），COCO 兼容导出 | [`segmentation_task.py`](backend/annotation_platform/segmentation_task.py) |
+| `polygon` | 可编辑多边形，COCO 预标导入、按版本修订已提交结果、标准 COCO 导出 | [`polygon_task.py`](backend/annotation_platform/polygon_task.py) |
 | `depth` | 深度图画笔标注 | [`depth_task.py`](backend/annotation_platform/depth_task.py) |
 
-> 以上六种任务类型均已端到端验证（单元测试 + 一次真实浏览器交互，见
+> 以上任务类型均已端到端验证（单元测试 + 一次真实浏览器交互，见
 > [`docs/detailed_design/00_概述.md`](docs/detailed_design/00_概述.md) §16.1）。
-> 文本标注的范围仍在 [#20](https://github.com/seagochen/annotation-toolkits/issues/20)
-> 中讨论，尚未实现。
+> 文本标注范围已在 [#20](https://github.com/seagochen/annotation-toolkits/issues/20)
+> 中决定：文档级分类/自由文本生成复用 `classification`/`captioning`（数据源由
+> `patterns` 决定，可以是 UTF-8 文本，[#39](https://github.com/seagochen/annotation-toolkits/issues/39)），
+> span/区间标注新增独立模块 `text_span`（[#40](https://github.com/seagochen/annotation-toolkits/issues/40)）。
 
 ## 运行要件
 
@@ -61,7 +65,8 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e 'backend[test]'
 
-export ANNOTATION_PROJECTS_CONFIG=backend/configs/projects.example.yaml
+# 工作区：项目配置、上传的数据和标注结果都保存在这里，首次使用时自动创建
+export ANNOTATION_WORKSPACE=./workspace
 uvicorn annotation_platform.server:app --app-dir backend --reload
 ```
 
@@ -73,7 +78,9 @@ npm install
 npm run dev
 ```
 
-浏览器访问 `http://127.0.0.1:5173`。服务默认监听 `127.0.0.1:8000`，接口文档见
+浏览器访问 `http://127.0.0.1:5173`，点左侧"新建项目"选择标注任务、填写属性，
+然后在项目里导入数据、标注和导出；项目只能在界面中创建和管理。关联服务器上已有的
+图片目录需要先用 `ANNOTATION_IMPORT_ROOTS` 允许该位置。服务默认监听 `127.0.0.1:8000`，接口文档见
 `http://127.0.0.1:8000/docs`；开发环境 CORS 默认只允许 `localhost:5173`/
 `127.0.0.1:5173`，其余来源与完整环境变量参考见
 [`docs/detailed_design/80_配置参考.md`](docs/detailed_design/80_配置参考.md)。
@@ -87,6 +94,42 @@ pip install -e 'backend[extract,ultralytics]'
 ReID 的数据约束、流水线接入和完整操作说明见 [`backend/README.md`](backend/README.md)；
 前端的完整开发、类型生成与验证命令见 [`frontend/README.md`](frontend/README.md)。
 
+### Docker 部署（GPU）
+
+镜像同时包含前端构建产物与后端，单端口 `3000` 提供页面和 API；运行时带 CUDA 12.6 +
+cuDNN 9，供 ReID 抽取/候选挖掘使用 GPU（需要宿主机安装 NVIDIA Container Toolkit）。
+
+```bash
+# <dir> 作为工作区挂载到 /data；要在界面中关联的服务器目录用 --mount 挂载
+python3 docker/build_and_run.py --data <dir> [--mount /abs/dataset/path ...]
+```
+
+浏览器访问 `http://<host>:3000`。平台没有登录，默认在所有网卡上开放；只在本机使用时
+加 `--bind 127.0.0.1`。挂载、权限与 GPU 检查见
+[`90_部署与运维.md`](docs/detailed_design/90_部署与运维.md) §3。
+
+## 导出
+
+每个项目的"导出"页按任务类型提供格式（原生 JSON、CSV、COCO 等）。每种格式都有带
+版本号的导出契约（如 `polygon-coco/v1`），下载前会按契约校验。不经浏览器时用命令行
+做确定性导出与校验：
+
+```bash
+# 已 pip install -e backend；工作区取 ANNOTATION_WORKSPACE（或 --workspace）
+python -m annotation_platform.exports contracts                      # 列出全部契约
+python -m annotation_platform.exports export <project-id> --format coco --output out.json
+python -m annotation_platform.exports check polygon-coco/v1 out.json  # 校验任意来源的文件
+```
+
+各契约的字段、坐标/编码规则与示例见
+[`70_外部接口.md`](docs/detailed_design/70_外部接口.md)"导出契约"。
+
+### 从旧 ReID CLI 迁移
+
+原仓库根目录下的 ReID 工具已移到 `backend/`：CLI 子命令和数据集文件格式不变，
+旧的 `serve` 网页由本平台取代。路径、命令与兼容性变化的对照表见
+[`30_ReID流水线.md`](docs/detailed_design/30_ReID流水线.md) §5。
+
 ## 文档
 
 | 文档 | 内容 |
@@ -95,7 +138,7 @@ ReID 的数据约束、流水线接入和完整操作说明见 [`backend/README.
 | [`docs/requirements/`](docs/requirements/00_概述.md) | 需求分析书：目标、范围、需求与验收 |
 | [`docs/overall_design/`](docs/overall_design/00_概述.md) | 总体设计书：架构、职责、数据与部署边界 |
 | [`docs/detailed_design/`](docs/detailed_design/00_概述.md) | 详细设计书：模块契约与实现 |
-| [`docs/detailed_design/70_外部接口.md`](docs/detailed_design/70_外部接口.md) | HTTP API 与各任务类型的提交/导出格式 |
+| [`docs/detailed_design/70_外部接口.md`](docs/detailed_design/70_外部接口.md) | HTTP API、各任务类型的提交格式与版本化导出契约（含示例与校验命令） |
 | [`docs/detailed_design/80_配置参考.md`](docs/detailed_design/80_配置参考.md) | 配置项与环境变量参考 |
 | [`docs/detailed_design/90_部署与运维.md`](docs/detailed_design/90_部署与运维.md) | 安装、启动、打包、运维 |
 | [`backend/README.md`](backend/README.md) | ReID 深度操作手册（流水线接入、训练交接、低精度约束） |
@@ -104,8 +147,9 @@ ReID 的数据约束、流水线接入和完整操作说明见 [`backend/README.
 
 ```text
 backend/
-├── annotation_platform/   # 任务类型协议 + 六个内置模块 + FastAPI 应用
+├── annotation_platform/   # 任务类型协议 + 内置任务模块 + FastAPI 应用
 ├── reid_annotation_tool/  # ReID CLI 与流水线
+├── local_files/           # 两个包共用的原子写入原语与路径锁
 ├── pipeline/              # 参考推理流水线
 ├── configs/               # 各任务类型 / 项目注册表的示例配置
 └── tests/                 # pytest 测试
@@ -114,8 +158,12 @@ frontend/
 └── src/
     ├── api/                       # 生成的 OpenAPI 类型 + 手写 client
     ├── components/image-canvas/   # 共享画布图元（检测/分割/深度复用）
+    ├── components/workspace/      # 标注工作台布局、快捷键、类别配色
     ├── pages/                     # 项目列表/详情、画布 demo
     └── tasks/<type>/              # 各任务类型的标注页面
+
+Dockerfile                # 前端构建 + CUDA 运行时的多阶段镜像
+docker/                   # 容器入口脚本与 build_and_run.py
 
 docs/requirements/        # 需求与验收标准
 docs/overall_design/      # 总体架构与跨系统约束
