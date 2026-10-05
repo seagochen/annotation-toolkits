@@ -161,37 +161,38 @@ class JobRunner:
         from .app import DISPATCH
 
         buffer = io.StringIO()
+        # The outcome is published only after the runner is free again: a
+        # client that sees "done" must be able to start the next job at once.
+        status, error, result = "failed", None, None
         try:
             job.status = "running"
             job.started_at = datetime.now().astimezone().isoformat()
             self._persist(job)
             with contextlib.redirect_stdout(buffer):
                 exit_code = DISPATCH[stage](project, args)
-            job.result = {"exit_code": exit_code}
+            result = {"exit_code": exit_code}
             if exit_code:
-                job.status, job.error = "failed", f"{stage} exited with code {exit_code}"
+                error = f"{stage} exited with code {exit_code}"
             else:
-                job.status = "done"
-        except SystemExit as error:
-            job.status = "failed"
-            job.error = str(error.code) if error.code not in (None, 0) else str(error)
-        except (ValueError, AssertionError) as error:
-            job.status = "failed"
-            job.error = str(error)
+                status = "done"
+        except SystemExit as exit_error:
+            error = (str(exit_error.code) if exit_error.code not in (None, 0)
+                     else str(exit_error))
+        except (ValueError, AssertionError) as failure:
+            error = str(failure)
         except Exception:  # noqa: BLE001 - a bad job must never crash the worker
-            job.status = "failed"
-            job.error = traceback.format_exc()
+            error = traceback.format_exc()
         finally:
             captured = buffer.getvalue().splitlines()
             if captured:
                 job.log.extend(captured)
-            job.finished_at = datetime.now().astimezone().isoformat()
             with self.lock:
                 self._busy = False
-            try:
-                self._persist(job)
-            finally:
-                _EXECUTION_GATE.release()
+            _EXECUTION_GATE.release()
+            job.result, job.error = result, error
+            job.finished_at = datetime.now().astimezone().isoformat()
+            job.status = status
+            self._persist(job)
 
     def _persist(self, job: Job) -> None:
         atomic_write_json(self.jobs_dir / f"{job.id}.json", job.to_dict())
