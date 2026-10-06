@@ -59,6 +59,7 @@ export function TaskWorkspace({
   tools,
   history,
   toolOptions,
+  stageAction,
   strip,
   rawData,
 }: {
@@ -67,11 +68,13 @@ export function TaskWorkspace({
   title: string;
   fileName?: string;
   progress: Progress | null;
-  remaining: number;
+  /** Items left, shown beside the progress; omitted, only "已完成 N / M" is shown. */
+  remaining?: number;
   unit?: string;
   stage: ReactNode;
   panel: ReactNode;
-  footer: ReactNode;
+  /** Below the progress: the save bar, or a save error of an autosaving page. */
+  footer?: ReactNode;
   hotkeys?: readonly Hotkey[];
   hints?: readonly ShortcutHint[];
   /** Canvas tools, in groups separated by a divider. */
@@ -79,6 +82,8 @@ export function TaskWorkspace({
   history?: HistoryControls;
   /** Settings of the active tool (brush size…), floated beside the tool rail. */
   toolOptions?: ReactNode;
+  /** Floated at the stage's bottom right (the zoom bar is bottom left): the submit button. */
+  stageAction?: ReactNode;
   /** The image list column (see img-annotation/common/ImageStrip). */
   strip?: ReactNode;
   /** The result as it would be saved, shown in the "原始数据" tab. */
@@ -143,7 +148,7 @@ export function TaskWorkspace({
             </div>
             <div className="workspace-panel-footer">
               <div className="workspace-progress">
-                {progress && (
+                {progress && remaining !== undefined && (
                   <div
                     aria-label="标注进度"
                     aria-valuemax={progress.total}
@@ -161,10 +166,12 @@ export function TaskWorkspace({
                       已完成 {progress.done} / {progress.total}
                     </span>
                   )}
-                  <div className="queue-count">
-                    <strong>{remaining}</strong>
-                    <span>{unit}待处理</span>
-                  </div>
+                  {remaining !== undefined && (
+                    <div className="queue-count">
+                      <strong>{remaining}</strong>
+                      <span>{unit}待处理</span>
+                    </div>
+                  )}
                 </div>
               </div>
               {footer}
@@ -219,6 +226,7 @@ export function TaskWorkspace({
             )}
           </div>
         )}
+        {stageAction && <div className="stage-action">{stageAction}</div>}
         {toolOptions && (
           <div aria-label="工具选项" className={hasRail ? "tool-options" : "tool-options no-rail"} role="group">
             {toolOptions}
@@ -247,129 +255,62 @@ function ShortcutList({ shortcuts }: { shortcuts: readonly ShortcutHint[] }) {
   );
 }
 
-/** One shape in the class/layer list (a polygon, a box, a keypoint…). */
-export type LayerRow = Readonly<{
-  key: string;
-  category: string;
-  /** Unique across the item, e.g. "多边形 #2"; the delete button says "删除多边形 #2". */
-  label: string;
-  meta: string;
-  active: boolean;
-  onSelect: () => void;
-  onDelete: () => void;
-}>;
-
 /**
- * Roboflow's "Classes" and "Layers" merged into one list: each category row,
- * with this item's shapes of that category nested under it.
- *
- * - A category row picks the category new shapes get (`current`, shown with
- *   the side bar) and is pressed while it is `focused`, which the canvas uses
- *   to show that category's vertices and handles. Pressing it again is the
- *   page's toggle (see `onPick`).
- * - The active shape row gets a category select to relabel it.
+ * Roboflow's "Classes" list with this item's count per category, under an
+ * "标注 N" heading. A category row is the category new shapes get
+ * (`current`, shown with the side bar) and is pressed while it is `focused`,
+ * which the canvas uses to show that category's vertices and handles; what a
+ * click does (focus, or relabel the selected shape) is the page's `onPick`.
  */
 export function ClassLayers({
   label,
   categories,
   current,
   focused,
-  rows,
-  emptyNote,
+  counts,
   onPick,
-  onRelabel,
 }: {
   label: string;
   categories: readonly string[];
   current: string;
   focused: string | null;
-  rows: readonly LayerRow[];
-  emptyNote: string;
+  counts: Readonly<Record<string, number>>;
   onPick: (category: string) => void;
-  onRelabel: (category: string) => void;
 }) {
-  // Shapes with a category the project does not declare still get a group.
-  const groups = [...categories, ...new Set(rows.map((row) => row.category).filter((c) => !categories.includes(c)))];
+  // Shapes with a category the project does not declare still get a row.
+  const groups = [...categories, ...Object.keys(counts).filter((category) => !categories.includes(category))];
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
   return (
     <section className="panel-section">
       <div className="panel-section-heading annotation-heading">
         <h2>标注</h2>
-        <span className="count-badge">{rows.length}</span>
+        <span className="count-badge">{total}</span>
       </div>
       <div aria-label={label} className="class-layers" role="group">
         {groups.map((category, index) => {
-          const members = rows.filter((row) => row.category === category);
           const color = categoryColor(categories.indexOf(category));
           return (
-            <div className="class-group" key={category} style={{ "--class-color": color } as CSSProperties}>
-              <button
-                aria-pressed={focused === category}
-                className={category === current ? "class-row current" : "class-row"}
-                onClick={() => onPick(category)}
-                title={focused === category ? "再次点击隐藏顶点" : "设为当前类别并显示该类的顶点"}
-                type="button"
-              >
-                <span aria-hidden="true" className="option-swatch" style={{ background: color }} />
-                <span className="option-name">{category}</span>
-                {members.length > 0 && (
-                  <span aria-hidden="true" className="option-count" title="本图中的数量">
-                    ×{members.length}
-                  </span>
-                )}
-                {index < 9 && categories.includes(category) && <kbd aria-hidden="true">{index + 1}</kbd>}
-              </button>
-              {members.length > 0 && (
-                <ul className="item-list">
-                  {members.map((row) => (
-                    <LayerItem categories={categories} key={row.key} onRelabel={onRelabel} row={row} />
-                  ))}
-                </ul>
-              )}
-            </div>
+            <button
+              aria-pressed={focused === category}
+              className={category === current ? "class-row current" : "class-row"}
+              key={category}
+              onClick={() => onPick(category)}
+              style={{ "--class-color": color } as CSSProperties}
+              type="button"
+            >
+              <span aria-hidden="true" className="option-swatch" style={{ background: color }} />
+              <span className="option-name">{category}</span>
+              {counts[category] ? (
+                <span aria-hidden="true" className="option-count" title="本图中的数量">
+                  ×{counts[category]}
+                </span>
+              ) : null}
+              {index < 9 && categories.includes(category) && <kbd aria-hidden="true">{index + 1}</kbd>}
+            </button>
           );
         })}
       </div>
-      {rows.length === 0 && <p className="empty-note">{emptyNote}</p>}
     </section>
-  );
-}
-
-function LayerItem({
-  row,
-  categories,
-  onRelabel,
-}: {
-  row: LayerRow;
-  categories: readonly string[];
-  onRelabel: (category: string) => void;
-}) {
-  return (
-    <>
-      <li>
-        <button aria-pressed={row.active} className="item-select" onClick={row.onSelect} type="button">
-          <span>{row.label}</span>
-          <span className="item-meta">{row.meta}</span>
-        </button>
-        <button aria-label={`删除${row.label}`} className="icon-button" onClick={row.onDelete} type="button">
-          ×
-        </button>
-      </li>
-      {row.active && (
-        <li className="layer-relabel">
-          <label>
-            类别
-            <select onChange={(event) => onRelabel(event.target.value)} value={row.category}>
-              {categories.includes(row.category) ? null : <option value={row.category}>{row.category}</option>}
-              {categories.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
-          </label>
-        </li>
-      )}
-    </>
   );
 }
 

@@ -19,7 +19,7 @@
 
 | 目录 | 内容 |
 |---|---|
-| [`img-annotation/common/`](../../frontend/src/img-annotation/common/) | 各类工具共用：[`image-canvas/`](../../frontend/src/img-annotation/common/image-canvas/)（与任务无关的画布图元，§5）、[`workspace/`](../../frontend/src/img-annotation/common/workspace/)（工作台布局、工具栏、撤销/重做、页面级快捷键 `useHotkeys`、类别配色，§6）、`useTaskQueue`（队列循环，§4）、`ImageStrip`（图像列表）、`ItemStage`（图片/文本舞台）、`useImageSize`（预探测图片像素尺寸） |
+| [`img-annotation/common/`](../../frontend/src/img-annotation/common/) | 各类工具共用：[`image-canvas/`](../../frontend/src/img-annotation/common/image-canvas/)（与任务无关的画布图元，§5）、[`workspace/`](../../frontend/src/img-annotation/common/workspace/)（工作台布局、工具栏、撤销/重做、页面级快捷键 `useHotkeys`、类别配色，§6）、`useTaskQueue`（队列循环，§4）、`useAutoSave`（草稿自动保存，§8）、`ImageStrip`（图像列表）、`ItemStage`（图片/文本舞台）、`useImageSize`（预探测图片像素尺寸） |
 | [`img-annotation/standard/`](../../frontend/src/img-annotation/standard/) | 通用传统标注：`classification/`、`caption/`、`detection/`、`segmentation/`、`polygon/`、`text-span/`（含纯函数 `text-span.ts`），各一个 `*ReviewPage.tsx` |
 | [`img-annotation/reid/`](../../frontend/src/img-annotation/reid/) | ReID / 相似度成对审核页与项目页上的 ReID 动作面板 |
 | [`img-annotation/depth/`](../../frontend/src/img-annotation/depth/) | 深度图标注页 |
@@ -127,17 +127,16 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 
 | 区域 | 内容 |
 |---|---|
-| 左栏 | 顶部：返回项目、`项目名 · 任务名`（`h1` 只含任务名）、当前文件名。其下一列图标页签切换面板：**标注**（页面的 `panel`）、**快捷键**（`hotkeys` + `hints`）、**原始数据**（页面传 `rawData` 时出现，显示将要提交的 `result`）。底部固定：进度条（`已完成 / 总数`）、剩余数（`.queue-count`）与 `SubmitBar`（保存按钮、禁用原因、保存失败与重试） |
+| 左栏 | 顶部：返回项目、`项目名 · 任务名`（`h1` 只含任务名）、当前文件名。其下一列图标页签切换面板：**标注**（页面的 `panel`）、**快捷键**（`hotkeys` + `hints`）、**原始数据**（页面传 `rawData` 时出现，显示将要提交的 `result`）。底部固定：`已完成 / 总数`；手动保存的页面另有进度条、剩余数（页面传 `remaining` 时的 `.queue-count`）与 `SubmitBar`（保存按钮、禁用原因、保存失败与重试），自动保存草稿的页面（多边形）只在草稿保存失败时显示错误，"加入数据集"按钮浮在画布右下角（`stageAction`） |
 | 舞台 | 画布、图片或文本，占满剩余高度，页面本身不滚动；文本条目（`media: "text"`）由 `img-annotation/common/ItemStage.tsx` 的 `TextDocument` 显示为可在舞台内滚动的文档（保留空白与换行），`text_error` 原样显示。`ImageCanvas` 左下角是缩放条（`−` 比例 `+` 适应） |
 | 工具栏 | 画布页传 `tools`（分组的按钮：图标、名称、快捷键）与 `history`（撤销/重做）时，舞台右上角浮出竖向工具栏；`toolOptions`（画笔半径等当前工具的设置）浮在工具栏左侧 |
 | 图像列表 | 页面传 `strip` 时的最右栏：`img-annotation/common/ImageStrip.tsx`，见下 |
 
 左栏面板内的组件：`PanelSection`、`OptionList`、`Segmented`、`RangeField`；检测与多边形
-用 `ClassLayers` 在"标注 N"下把类别与图层合成一个列表：每个类别一行（色块、名称、本图
-数量、数字键），其下缩进列出本图该类别的形状（`LayerRow`：可选中、删除；选中的形状行下
-出现"类别"下拉框，用来改类别）。点击类别行 = 设为新形状的当前类别（左侧竖条）并高亮该
-类别（按下态）：画布显示该类所有多边形的顶点、框的四角，其他类别淡化；再点一次取消高亮，
-`Esc` 也会取消。
+用 `ClassLayers` 在"标注 N"下列出类别：每个类别一行（色块、名称、本图数量、数字键）。
+选中了形状时，点击类别行 = 把该形状改为这个类别；否则 = 设为新形状的当前类别（左侧竖条）
+并高亮该类别（按下态）：画布显示该类所有多边形的顶点、框的四角，其他类别淡化；再点一次
+取消高亮，`Esc` 也会取消。
 
 **图像列表**（`ImageStrip`，ReID 之外的任务页都有）：不带 `status` 分页读取全部条目
 （每页 200，"加载更多"续读），每项一张缩略图（文本条目为文档图标）、文件名，已完成的
@@ -173,7 +172,7 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 
 | 页面 | 快捷键 |
 |---|---|
-| 全部（ReID 除外） | `Ctrl/⌘ + Enter` 保存并继续（描述页在输入框内也可用） |
+| 全部（ReID 除外） | `Ctrl/⌘ + Enter` 保存并继续（描述页在输入框内也可用；多边形为"加入数据集"，编辑本身自动存为草稿） |
 | 全部画布页 | `H` 拖动画布工具、`Ctrl/⌘ + Z` 撤销、`Ctrl/⌘ + Shift + Z` 或 `Ctrl/⌘ + Y` 重做 |
 | 分类 | `1`–`9` 选择/切换第 N 个标签 |
 | 文本片段 | 拖选文本新建片段（当前标签）、`1`–`9` 选择标签（选中片段时改为该标签）、`Del`/`Backspace` 删除选中片段、`Esc` 取消选中 |
@@ -211,9 +210,26 @@ polygon 小节，`polygon-json/v2` / `polygon-coco/v2`）。工具栏：选择�
 
 `PolygonReviewPage` 以队列条目的 `polygons`/`boxes`/`points`（已提交结果或预标）初始化
 `polygon-tool.ts`、`box-tool.ts` 与关键点的状态，按条目的 `item_id` + `revision` + `source` 判断是否需要
-重新初始化。提交带上条目的 `revision` 作为 `base_revision`，409 时提示并提供
-"重新载入"。`useTaskQueue` 的 `browse({ status, offset })` 让页面在"待标注"与
-"已提交"之间切换，并从图像列表打开任意一张（`status=annotated&offset=N&limit=1`），于是已提交的
-结果可以再次修改、生成新版本。浏览器加载出的图片尺寸与预标/已保存结果的尺寸不一致
-时，侧栏提示（后端会拒绝这种提交）。项目概览页把 `summary.prelabel_issues` 渲染为
+重新初始化。
+
+多边形页把**草稿**与**加入数据集**分开：
+
+- **草稿自动保存**（`img-annotation/common/useAutoSave.ts`）：结果（三个列表）每次"落定"
+  （不在拖动中）且与上次保存/载入的不同，约 0.6 秒后用 `useTaskQueue().saveDraft`
+  （`PUT /api/projects/{id}/drafts`）保存为草稿，不离开当前条目、不算完成；同一时刻只有
+  一个保存在进行，期间的修改在它完成后接着保存。未闭合的多边形不属于结果。打开别的条目前
+  `useTaskQueue` 先调用页面登记的 `leaveGuard` 把待保存的草稿存完（失败则停留）；离开页面
+  时立即提交尚在等待的保存。草稿保存失败时左栏底部显示错误与"重试"。再次打开条目时队列
+  返回草稿（`source: "draft"`），图像列表在有草稿的缩略图左上角显示橙点。
+- **加入数据集**：画布右下角（与左下角的缩放条同一高度，`TaskWorkspace` 的 `stageAction`）
+  的"加入数据集"按钮或 `Ctrl/⌘ + Enter`，先等草稿保存落定
+  （`settle()`，避免提交后又写出草稿），再以条目的 `revision` 作 `base_revision` 提交，
+  后端删除该草稿；之后同 `useTaskQueue().submit`：重新读取队列（待标注队列即下一张），
+  缩略图打勾，"已完成"按提交响应的 `total`/`pending` 更新。已提交且未改动的条目按钮显示
+  "已在数据集中"并禁用。提交失败（如 409）在按钮上方显示错误、"重试"与"重新载入"。
+
+侧栏没有"待标注/已提交"切换，已提交的条目从图像列表打开（`browse({ status: "annotated",
+offset })`，`status=annotated&offset=N&limit=1`），再次修改即生成新版本；只有待标注队列为空时，
+完成页仍提供该切换。浏览器加载出的图片尺寸与预标/已保存结果的尺寸不一致时，侧栏提示
+（后端会拒绝这种提交）。项目概览页把 `summary.prelabel_issues` 渲染为
 "未加载的预标"表格。

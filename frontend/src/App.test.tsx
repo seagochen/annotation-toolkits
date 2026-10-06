@@ -30,6 +30,14 @@ function response(value: object, status = 200) {
   });
 }
 
+/** A successful POST /annotations of an autosaving page. */
+function saved(itemId: string, revision: number, pending: number, total = 2) {
+  return response({
+    item: { item_id: itemId, revision },
+    status: { state: "reviewing", details: { total, pending } },
+  });
+}
+
 function renderAt(path = "/") {
   window.history.replaceState({}, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
@@ -818,7 +826,7 @@ describe("project pages", () => {
     vi.stubGlobal("Image", InstantImage);
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
     const square = { category: "cat", points: [[10, 10], [50, 10], [50, 50], [10, 50]] };
-    const triangle = { category: "cat", points: [[60, 10], [90, 10], [75, 40]] };
+    const triangle = { category: "dog", points: [[60, 10], [90, 10], [75, 40]] };
     // A real canvas size, so the drag below lands on empty image area.
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
@@ -828,13 +836,14 @@ describe("project pages", () => {
     ];
     itemList = () => response({ total: 2, offset: 0, limit: 200, items });
     fetchMock
-      .mockResolvedValueOnce(response({ id: "walls", name: "Walls", task_type: "polygon", summary: { categories: ["cat"], total: 2, pending: 2 } }))
+      .mockResolvedValueOnce(response({ id: "walls", name: "Walls", task_type: "polygon", summary: { categories: ["cat", "dog"], total: 2, pending: 2 } }))
       .mockResolvedValueOnce(response({ total: 2, offset: 0, limit: 1, items: [items[0]] }))
       .mockResolvedValueOnce(response({ total: 2, offset: 1, limit: 1, items: [items[1]] }));
 
     renderAt("/projects/walls/polygon");
     const canvas = await screen.findByRole("application", { name: "a.jpg" });
-    expect(screen.getByRole("button", { name: /^多边形 #1 4 点/ })).toBeVisible();
+    const classes = screen.getByRole("group", { name: "标注类别" });
+    expect(within(within(classes).getByRole("button", { name: "cat" })).getByText("×1")).toBeVisible();
     // A drag that edits nothing still sends pointer moves, whose no-op state
     // updates React keeps pending; the next image must not fall back to these shapes.
     const pointer = (type: string, clientX: number, clientY: number) => {
@@ -849,7 +858,8 @@ describe("project pages", () => {
     const strip = screen.getByRole("complementary", { name: "图像列表" });
     fireEvent.click(await within(strip).findByRole("button", { name: "b.jpg" }));
     expect(await screen.findByRole("application", { name: "b.jpg" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^多边形 #1 3 点/ })).toBeVisible();
+    expect(within(within(classes).getByRole("button", { name: "dog" })).getByText("×1")).toBeVisible();
+    expect(within(within(classes).getByRole("button", { name: "cat" })).queryByText("×1")).toBeNull();
     expect(screen.getByRole("button", { name: "撤销" })).toBeDisabled();
   });
 
@@ -888,7 +898,7 @@ describe("project pages", () => {
     expect(await screen.findByRole("application", { name: "b.jpg" })).toBeVisible();
   });
 
-  it("starts a polygon item from its prelabel, edits it and submits the revision it started from", async () => {
+  it("autosaves polygon edits as a draft and adds the item to the dataset only when asked", async () => {
     class InstantImage {
       onload: (() => void) | null = null;
       naturalWidth = 100;
@@ -899,6 +909,9 @@ describe("project pages", () => {
     }
     vi.stubGlobal("Image", InstantImage);
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    // An 800×600 canvas shows the 100×80 image at 6.9× from (55, 24).
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
     const prelabelItem = {
       item_id: "p1",
       image_path: "wall.jpg",
@@ -911,7 +924,10 @@ describe("project pages", () => {
       ],
       boxes: [{ category: "crack", x: 5, y: 60, width: 20, height: 10 }],
       points: [{ category: "material", x: 70.004, y: 30 }],
+      draft: false,
+      annotated: false,
     };
+    itemList = () => response({ total: 1, offset: 0, limit: 200, items: [prelabelItem] });
     fetchMock
       .mockResolvedValueOnce(
         response({
@@ -924,68 +940,78 @@ describe("project pages", () => {
         }),
       )
       .mockResolvedValueOnce(response({ total: 1, offset: 0, limit: 1, items: [prelabelItem] }))
+      .mockResolvedValueOnce(response({ item_id: "p1", draft: true, updated_at: "2026-10-06T00:00:00Z" }))
+      .mockResolvedValueOnce(response({ item_id: "p1", draft: true, updated_at: "2026-10-06T00:00:01Z" }))
       .mockResolvedValueOnce(
         response({ detail: { code: "task_conflict", message: "polygon item 'p1' is at revision 1" } }, 409),
       )
-      .mockResolvedValueOnce(
-        response({
-          total: 1,
-          offset: 0,
-          limit: 1,
-          items: [{ ...prelabelItem, revision: 2, source: "annotation", polygons: [], boxes: [], points: [] }],
-        }),
-      );
+      .mockResolvedValueOnce(saved("p1", 1, 0))
+      .mockResolvedValueOnce(response({ total: 0, offset: 0, limit: 1, items: [] }));
 
     renderAt("/projects/walls/polygon");
-    expect(await screen.findByText("初始内容：COCO 预标。")).toBeVisible();
-    // Each category of the annotation panel lists this image's shapes of that category.
+    const canvas = await screen.findByRole("application", { name: "wall.jpg" });
+    expect(screen.queryByRole("button", { name: "已提交" })).toBeNull();
+    expect(screen.getByText("已完成 1 / 2")).toBeVisible();
+    // The class list counts this image's shapes per category; new shapes get the first one.
     const classes = screen.getByRole("group", { name: "标注类别" });
     const material = within(classes).getByRole("button", { name: "material" });
-    const groupOf = (button: HTMLElement) => button.closest(".class-group") as HTMLElement;
-    expect(within(groupOf(material)).getByRole("button", { name: /^多边形 #1/ })).toBeVisible();
-    expect(within(groupOf(material)).getByRole("button", { name: /^点 #1/ })).toBeVisible();
+    const crack = within(classes).getByRole("button", { name: "crack" });
+    expect(within(material).getByText("×2")).toBeVisible();
+    expect(material).toHaveClass("current");
     // Pressing a category shows its vertices; pressing it again hides them.
     fireEvent.click(material);
     expect(material).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(material);
     expect(material).toHaveAttribute("aria-pressed", "false");
-    // Select the first polygon from the list, relabel it with the digit key, delete the second.
-    fireEvent.click(screen.getByRole("button", { name: /^多边形 #1/ }));
-    fireEvent.keyDown(window, { key: "2" });
-    const crack = within(classes).getByRole("button", { name: "crack" });
-    expect(within(groupOf(crack)).getByRole("button", { name: /^多边形 #1/ })).toBeVisible();
-    // The selected shape can be relabelled from its row as well.
-    fireEvent.change(screen.getByRole("combobox", { name: "类别" }), { target: { value: "material" } });
-    expect(within(groupOf(material)).getByRole("button", { name: /^多边形 #1/ })).toBeVisible();
-    fireEvent.change(screen.getByRole("combobox", { name: "类别" }), { target: { value: "crack" } });
-    fireEvent.click(screen.getByRole("button", { name: "删除多边形 #2" }));
-    // Boxes and keypoints from the prelabel are listed too.
-    fireEvent.click(screen.getByRole("button", { name: "删除框 #1" }));
-    expect(screen.queryByRole("button", { name: /^框 #1/ })).toBeNull();
-    const save = screen.getByRole("button", { name: "保存并继续" });
-    await waitFor(() => expect(save).toBeEnabled());
-    fireEvent.click(save);
 
+    // Select the square on the canvas and relabel it by clicking a category.
+    const pointer = (type: string, x: number, y: number) => {
+      const event = new MouseEvent(type, { bubbles: true, clientX: 55 + x * 6.9, clientY: 24 + y * 6.9 });
+      Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "mouse" } });
+      fireEvent(canvas, event);
+    };
+    pointer("pointerdown", 30, 30);
+    pointer("pointerup", 30, 30);
+    fireEvent.click(crack);
+    expect(within(crack).getByText("×3")).toBeVisible();
+
+    // The edit is kept as a draft shortly after: not a submission.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3), { timeout: 3000 });
+    const draft = fetchMock.mock.calls[2][0] as Request;
+    expect(draft.method).toBe("PUT");
+    expect(new URL(draft.url).pathname).toBe("/api/projects/walls/drafts");
+    await expect(draft.clone().json()).resolves.toMatchObject({
+      item_id: "p1",
+      result: { base_revision: 0, polygons: [{ category: "crack" }, { category: "crack" }] },
+    });
+    const strip = screen.getByRole("complementary", { name: "图像列表" });
+    expect(await within(strip).findByRole("button", { name: "wall.jpg（有草稿）" })).toBeVisible();
+    expect(screen.getByText("已完成 1 / 2")).toBeVisible();
+
+    // Deleting the selected square is another draft.
+    fireEvent.keyDown(window, { key: "Delete" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4), { timeout: 3000 });
+
+    // "加入数据集" submits from the revision the item started from; a conflict is reported.
+    // The button floats at the canvas's bottom right, not in the image list.
+    expect(within(strip).queryByRole("button", { name: /加入数据集/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /加入数据集/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("at revision 1");
-    const request = fetchMock.mock.calls[2][0] as Request;
-    await expect(request.clone().json()).resolves.toEqual({
+    const submitted = fetchMock.mock.calls[4][0] as Request;
+    expect(submitted.method).toBe("POST");
+    await expect(submitted.clone().json()).resolves.toEqual({
       item_id: "p1",
       result: {
         image_size: { width: 100, height: 80 },
         base_revision: 0,
-        polygons: [{ category: "crack", points: [[10, 10], [50, 10], [50, 50], [10, 50]] }],
-        boxes: [],
+        polygons: [{ category: "crack", points: [[60, 10], [90, 10], [75, 40]] }],
+        boxes: [{ category: "crack", x: 5, y: 60, width: 20, height: 10 }],
         points: [{ category: "material", x: 70, y: 30 }],
       },
     });
-
-    // Browsing submitted results asks for the annotated queue.
-    fireEvent.click(screen.getByRole("button", { name: "已提交" }));
-    expect(await screen.findByText(/第 2 版/)).toBeVisible();
-    const browse = new URL((fetchMock.mock.calls[3][0] as Request).url);
-    expect(browse.searchParams.get("status")).toBe("annotated");
-    expect(browse.searchParams.get("offset")).toBe("0");
-    expect(screen.getByText("还没有标注。该图没有目标时可直接保存。")).toBeVisible();
+    // Retrying adds it; the queue moves on (here: nothing left).
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(await screen.findByRole("heading", { name: "多边形标注已完成" })).toBeVisible();
     getContext.mockRestore();
   });
 

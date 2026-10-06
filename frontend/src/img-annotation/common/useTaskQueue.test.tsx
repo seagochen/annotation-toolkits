@@ -57,7 +57,7 @@ it("blocks navigation while a save is pending and invalidates an earlier browse"
   });
   expect(result.current.item?.item_id).toBe("a");
   expect(getQueue).toHaveBeenCalledTimes(2);
-  await act(async () => { resolveSave({} as never); await save; });
+  await act(async () => { resolveSave({ item: {}, status: { state: "reviewing", details: {} } } as never); await save; });
   expect(result.current.item?.item_id).toBe("next");
   expect(result.current.savedIds.has("a")).toBe(true);
 });

@@ -55,6 +55,7 @@ from ...task_types import (
     Submission,
     TaskConflictError,
     TaskOperationError,
+    TaskProject,
     TaskStatus,
 )
 
@@ -64,6 +65,7 @@ BOX_FIELDS = frozenset({"category", "x", "y", "width", "height"})
 POINT_FIELDS = frozenset({"category", "x", "y"})
 # Sidecar `schema` written by this module; 1 (polygons only) is still read.
 SIDECAR_SCHEMA = 2
+DRAFTS_SCHEMA = 1
 COCO_VERSION = 2
 COCO_IMAGE_FIELDS = frozenset({"id", "file_name", "width", "height"})
 MIN_POINTS = 3
@@ -465,6 +467,13 @@ class PolygonStore(ImageTaskStore):
     def __init__(self, project) -> None:
         super().__init__(project)
         self._prelabels: Prelabels | None = None
+        # The drafts of one queue read (a store lives for one request).
+        self._drafts: dict[str, dict] | None = None
+
+    @property
+    def drafts_file(self) -> Path:
+        """Unsubmitted working copies, beside (never inside) the annotations sidecar."""
+        return self.sidecar.with_name(f"{self.sidecar.stem}.drafts.json")
 
     def excluded(self) -> tuple[Path, ...]:
         # The prelabel file is never a source image, whatever `patterns` says.
@@ -481,9 +490,8 @@ class PolygonStore(ImageTaskStore):
                 )
         return self._prelabels
 
-    def valid_item(self, saved: dict) -> bool:
-        revision = saved.get("revision")
-
+    @staticmethod
+    def _valid_shape_lists(saved: dict) -> bool:
         def shapes(key: str, fields: frozenset, required: bool) -> bool:
             value = saved.get(key, None if required else [])
             return isinstance(value, list) and all(
@@ -492,16 +500,72 @@ class PolygonStore(ImageTaskStore):
 
         return (
             is_image_size(saved.get("image_size"))
-            and isinstance(revision, int)
-            and revision >= 1
             and shapes("polygons", POLYGON_FIELDS, True)
             and shapes("boxes", BOX_FIELDS, False)
             and shapes("points", POINT_FIELDS, False)
         )
 
+    def valid_item(self, saved: dict) -> bool:
+        revision = saved.get("revision")
+        return isinstance(revision, int) and revision >= 1 and self._valid_shape_lists(saved)
+
+    def _read_drafts(self) -> dict[str, dict]:
+        """The drafts file's items; a missing file has none."""
+        if not self.drafts_file.is_file():
+            return {}
+        try:
+            value = json.loads(self.drafts_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise TaskOperationError(f"cannot read polygon drafts {self.drafts_file}: {error}") from error
+        items = value.get("items") if isinstance(value, dict) and value.get("schema") == DRAFTS_SCHEMA else None
+        if not isinstance(items, dict):
+            raise TaskOperationError(f"invalid polygon drafts file {self.drafts_file}")
+        return {
+            item_id: draft
+            for item_id, draft in items.items()
+            if isinstance(draft, dict) and self._valid_shape_lists(draft)
+        }
+
+    def _write_drafts(self, drafts: dict[str, dict]) -> None:
+        try:
+            if drafts:
+                atomic_write_json(self.drafts_file, {"schema": DRAFTS_SCHEMA, "items": drafts})
+            elif self.drafts_file.is_file():
+                self.drafts_file.unlink()
+        except OSError as error:
+            raise TaskOperationError(f"cannot persist polygon drafts: {error}") from error
+
+    def _submitted_shapes(self, submission: Submission) -> tuple[int, dict, dict]:
+        """The submission's base revision, image size and validated shapes."""
+        result = submission.result
+        base_revision = _revision(result.get("base_revision"))
+        size = image_size(result.get("image_size"), "polygon")
+        shapes = {
+            "polygons": _polygons(result.get("polygons"), self.project.categories, size),
+            "boxes": _boxes(result.get("boxes"), self.project.categories, size),
+            "points": _keypoints(result.get("points"), self.project.categories, size),
+        }
+        return base_revision, size, shapes
+
+    def _check_size(self, item_id: str, current: dict | None, size: dict) -> None:
+        # A saved result, or else loaded prelabels, pin the coordinate frame of the item.
+        prelabel = self.prelabels().polygons.get(item_id)
+        expected = (
+            current["image_size"] if current is not None
+            else None if prelabel is None else prelabel["image_size"]
+        )
+        if expected is not None and expected != size:
+            raise TaskOperationError(
+                f"polygon image_size {size} does not match the image's known size {expected}"
+            )
+
     def item_view(self, item_id: str, image_path: str, saved: dict | None) -> dict:
         prelabel = self.prelabels().polygons.get(item_id)
-        if saved is not None:
+        draft = (self._drafts or {}).get(item_id)
+        if draft is not None:
+            # The working copy wins; `revision` stays the submitted one it builds on.
+            source, size, shapes = "draft", draft["image_size"], _shapes(draft)
+        elif saved is not None:
             source, size, shapes = "annotation", saved["image_size"], _shapes(saved)
         elif prelabel is not None:
             source, size, shapes = "prelabel", prelabel["image_size"], _shapes(prelabel)
@@ -514,6 +578,7 @@ class PolygonStore(ImageTaskStore):
             "source": source,
             "image_size": size,
             **shapes,
+            "draft": draft is not None,
         }
 
     @staticmethod
@@ -538,7 +603,12 @@ class PolygonStore(ImageTaskStore):
 
     def queue(self, request: QueueRequest) -> QueuePage:
         self.prelabels()  # a broken prelabel file fails the queue, not a page later
-        return super().queue(request)
+        with self.lock:
+            self._drafts = self._read_drafts()
+            try:
+                return super().queue(request)
+            finally:
+                self._drafts = None
 
     def status(self) -> TaskStatus:
         base = super().status()
@@ -555,30 +625,54 @@ class PolygonStore(ImageTaskStore):
             details["prelabel_issues"] = prelabels.issues[:MAX_REPORTED_ISSUES]
         return TaskStatus(base.state, details)
 
+    def save_draft(self, submission: Submission) -> dict:
+        """Keep (autosave) the item's unsubmitted working copy.
+
+        A draft equal to what the item already starts from (its submitted
+        result, else its prelabel, else nothing) is dropped instead.
+        """
+        base_revision, size, shapes = self._submitted_shapes(submission)
+        item_id = submission.item_id
+        self.image_path(item_id)
+        with self.lock:
+            current = self.upgrade(self._read())["items"].get(item_id)
+            self._check_size(item_id, current, size)
+            prelabel = self.prelabels().polygons.get(item_id)
+            baseline = (
+                _shapes(current) if current is not None
+                else _shapes(prelabel) if prelabel is not None
+                else {"polygons": [], "boxes": [], "points": []}
+            )
+            drafts = self._read_drafts()
+            if shapes == baseline:
+                if drafts.pop(item_id, None) is not None:
+                    self._write_drafts(drafts)
+                return {"item_id": item_id, "draft": False}
+            updated_at = datetime.now(timezone.utc).isoformat()
+            drafts[item_id] = {
+                "image_size": size,
+                **shapes,
+                "base_revision": base_revision,
+                "updated_at": updated_at,
+            }
+            self._write_drafts(drafts)
+            return {"item_id": item_id, "draft": True, "updated_at": updated_at}
+
+    def _drop_draft(self, item_id: str) -> None:
+        drafts = self._read_drafts()
+        if drafts.pop(item_id, None) is not None:
+            self._write_drafts(drafts)
+
     def submit(self, submission: Submission) -> dict:
-        result = submission.result
-        base_revision = _revision(result.get("base_revision"))
-        size = image_size(result.get("image_size"), "polygon")
-        shapes = {
-            "polygons": _polygons(result.get("polygons"), self.project.categories, size),
-            "boxes": _boxes(result.get("boxes"), self.project.categories, size),
-            "points": _keypoints(result.get("points"), self.project.categories, size),
-        }
+        base_revision, size, shapes = self._submitted_shapes(submission)
         image_path = self.image_path(submission.item_id)
-        # Loaded prelabels pin the coordinate frame their polygons were made in.
-        prelabel = self.prelabels().polygons.get(submission.item_id)
-        expected = None if prelabel is None else prelabel["image_size"]
         with self.lock:
             state = self.upgrade(self._read())
             current = state["items"].get(submission.item_id)
-            if current is not None:
-                expected = current["image_size"]
-            if expected is not None and expected != size:
-                raise TaskOperationError(
-                    f"polygon image_size {size} does not match the image's known size {expected}"
-                )
+            self._check_size(submission.item_id, current, size)
             current_revision = 0 if current is None else current["revision"]
             if current is not None and _shapes(current) == shapes:
+                self._drop_draft(submission.item_id)
                 return {"item_id": submission.item_id, **current}
             if base_revision != current_revision:
                 raise TaskConflictError(
@@ -604,6 +698,8 @@ class PolygonStore(ImageTaskStore):
                 atomic_write_json(self.project.annotations, state)
             except OSError as error:
                 raise TaskOperationError(f"cannot persist polygon result: {error}") from error
+            # Submitted: the working copy has done its job.
+            self._drop_draft(submission.item_id)
             return {"item_id": submission.item_id, **saved}
 
     def export(self, request: ExportRequest) -> ExportResult:
@@ -696,3 +792,8 @@ class PolygonTaskType(ImageTaskType):
     project_type = PolygonProject
     store_type = PolygonStore
     config_loader = staticmethod(load_config)
+
+    def save_draft(self, project: TaskProject, submission: Submission) -> dict:
+        store = self._store(project)
+        assert isinstance(store, PolygonStore)
+        return store.save_draft(submission)

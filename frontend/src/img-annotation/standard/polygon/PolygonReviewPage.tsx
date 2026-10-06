@@ -60,12 +60,9 @@ import {
   CANVAS_HINTS,
   ClassLayers,
   CompleteState,
-  PanelSection,
   RangeField,
   Segmented,
-  SubmitBar,
   TaskWorkspace,
-  type LayerRow,
 } from "../../common/workspace/TaskWorkspace";
 import { categoryColor } from "../../common/workspace/palette";
 import {
@@ -88,6 +85,7 @@ import {
 } from "../../common/workspace/useHotkeys";
 import { summaryProgress } from "../../../project-meta";
 import { ImageStrip } from "../../common/ImageStrip";
+import { useAutoSave } from "../../common/useAutoSave";
 import { useImageSize } from "../../common/useImageSize";
 import { itemText, summaryStrings, useResetOnItem, useTaskQueue, type QueueItem } from "../../common/useTaskQueue";
 
@@ -109,12 +107,6 @@ type Shapes = Readonly<{ polygons: readonly Polygon[]; boxes: readonly Box[]; po
 function sameShapes(a: Shapes, b: Shapes): boolean {
   return a.polygons === b.polygons && a.boxes === b.boxes && a.points === b.points;
 }
-
-const SOURCE_LABELS: Record<string, string> = {
-  annotation: "已提交的结果",
-  prelabel: "COCO 预标",
-  none: "空白",
-};
 
 function storedList<T>(item: QueueItem, key: string): T[] {
   const value = item[key];
@@ -154,15 +146,6 @@ function roundBox(box: Box, size: { width: number; height: number }) {
   return { category: box.category, x, y, width, height };
 }
 
-function polygonArea(points: readonly Point[]): number {
-  let total = 0;
-  points.forEach((point, index) => {
-    const next = points[(index + 1) % points.length];
-    total += point.x * next.y - next.x * point.y;
-  });
-  return Math.abs(total) / 2;
-}
-
 function strokePath(context: CanvasRenderingContext2D, points: readonly Point[], close: boolean) {
   context.beginPath();
   points.forEach((point, index) => (index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y)));
@@ -191,7 +174,7 @@ export function PolygonReviewPage() {
     taskType: "polygon",
     wrongType: "该项目不是多边形标注任务。",
   });
-  const { ready, item, submitting, submitError, view } = queue;
+  const { ready, item, view } = queue;
   const categories = useMemo(
     () => (ready ? summaryStrings(ready.project, "categories") : []),
     [ready],
@@ -204,15 +187,16 @@ export function PolygonReviewPage() {
 
   // Each item (and each new revision of it) starts from what the server sent;
   // `item` changes identity on every queue read, the key says when it is really new.
-  useResetOnItem(queue, polygonItemKey, (shown) => {
+  useResetOnItem(queue, polygonItemKey, (shown, project) => {
     if (!shown) return;
+    const firstCategory = project ? (summaryStrings(project, "categories")[0] ?? "") : "";
     const polygons = createPolygons(
       storedList<StoredPolygon>(shown, "polygons").map((polygon) => ({
         category: polygon.category,
         points: polygon.points.map(([x, y]) => ({ x, y })),
       })),
     );
-    setTool((current) => createPolygonToolState(polygons, current.category || categories[0] || ""));
+    setTool((current) => createPolygonToolState(polygons, current.category || firstCategory));
     setBoxTool(createBoxToolState(createBoxes(storedList<StoredBox>(shown, "boxes"))));
     setKeyPoints(createKeyPoints(storedList<StoredPoint>(shown, "points")));
     setSelectedPointId(null);
@@ -513,10 +497,15 @@ export function PolygonReviewPage() {
   }
 
   /**
-   * A category row of the panel: new shapes get that category and its
-   * vertices are shown; pressing the shown category again hides them.
+   * A category row of the panel. With a shape selected it relabels the
+   * shape; otherwise new shapes get that category and its vertices are
+   * shown, pressing the shown category again hides them.
    */
   function pickCategory(next: string) {
+    if (selectedShape && mode === "edit") {
+      relabel(next);
+      return;
+    }
     setTool((current) => setCategory(current, next));
     setFocused((current) => (current === next ? null : next));
     selectOnly(null);
@@ -558,7 +547,7 @@ export function PolygonReviewPage() {
     if (!selectedPolygon) return;
     if (tool.selectedVertex !== null) {
       if (selectedPolygon.points.length <= MIN_POLYGON_POINTS) {
-        setNotice(`多边形至少需要 ${MIN_POLYGON_POINTS} 个顶点；要去掉整个多边形，请先取消选中顶点或用列表中的 ×。`);
+        setNotice(`多边形至少需要 ${MIN_POLYGON_POINTS} 个顶点；要去掉整个多边形，请点选多边形内部（不选顶点）后再按 Del。`);
         return;
       }
       setTool((current) => deleteVertex(current, selectedPolygon.id, current.selectedVertex ?? -1));
@@ -567,25 +556,41 @@ export function PolygonReviewPage() {
     setTool((current) => removePolygon(current, selectedPolygon.id));
   }
 
-  const result = imageSize
-    ? {
-        image_size: imageSize,
-        base_revision: revision,
-        polygons: tool.polygons.map((polygon) => ({
-          category: polygon.category,
-          points: polygon.points.map((point) => [round(point.x), round(point.y)]),
-        })),
-        boxes: boxTool.boxes.map((box) => roundBox(box, imageSize)),
-        points: keyPoints.map((point) => ({ category: point.category, x: round(point.x), y: round(point.y) })),
-      }
-    : undefined;
+  const savedShapes = useMemo(
+    () =>
+      imageSize
+        ? {
+            polygons: tool.polygons.map((polygon) => ({
+              category: polygon.category,
+              points: polygon.points.map((point) => [round(point.x), round(point.y)]),
+            })),
+            boxes: boxTool.boxes.map((box) => roundBox(box, imageSize)),
+            points: keyPoints.map((point) => ({ category: point.category, x: round(point.x), y: round(point.y) })),
+          }
+        : undefined,
+    [boxTool.boxes, imageSize, keyPoints, tool.polygons],
+  );
+  // The submitted result builds on the item's submitted revision (a draft does too).
+  const result =
+    imageSize && savedShapes ? { image_size: imageSize, base_revision: revision, ...savedShapes } : undefined;
+
+  // Every settled edit is kept as a draft (an unfinished polygon is not part of it);
+  // only "加入数据集" submits the item.
+  const autoSave = useAutoSave(queue, {
+    itemKey,
+    itemId: item ? itemText(item, "item_id") : "",
+    content: savedShapes && !editing ? JSON.stringify(savedShapes) : null,
+    build: () => result,
+  });
 
   async function submit() {
-    if (!item || !result || submitting) return;
+    if (!item || !result || queue.submitting) return;
     if (tool.draft?.length) {
-      setNotice("还有未闭合的多边形：按 Enter 闭合，或按 Esc 放弃后再保存。");
+      setNotice("还有未闭合的多边形：按 Enter 闭合，或按 Esc 放弃后再加入数据集。");
       return;
     }
+    // No draft may be written after the submission replaced it.
+    await autoSave.settle();
     await queue.submit(itemText(item, "item_id"), result);
   }
 
@@ -666,12 +671,7 @@ export function PolygonReviewPage() {
     },
     { keys: UNDO_KEYS, display: `${MOD_LABEL} + Z`, description: "撤销（绘制时撤销一点）", run: undo },
     { keys: REDO_KEYS, display: `${MOD_LABEL} + Shift + Z`, description: "重做", run: redo },
-    {
-      keys: SAVE_KEYS,
-      display: `${MOD_LABEL} + Enter`,
-      description: "保存并继续",
-      run: () => void submit(),
-    },
+    { keys: SAVE_KEYS, display: `${MOD_LABEL} + Enter`, description: "加入数据集并打开下一张", run: () => void submit() },
   ];
   useHotkeys(hotkeys, Boolean(item));
 
@@ -711,86 +711,31 @@ export function PolygonReviewPage() {
     );
   }
 
+  const counts: Record<string, number> = {};
+  for (const shape of [...tool.polygons, ...boxTool.boxes, ...keyPoints]) {
+    counts[shape.category] = (counts[shape.category] ?? 0) + 1;
+  }
   const source = itemText(item, "source");
-  const browsing = view.status === "annotated";
-  const dirty = history.canUndo || Boolean(tool.draft?.length);
-
-  const layerRows: LayerRow[] = [
-    ...tool.polygons.map((polygon, index) => ({
-      key: polygon.id,
-      category: polygon.category,
-      label: `多边形 #${index + 1}`,
-      meta: `${polygon.points.length} 点 · ${Math.round(polygonArea(polygon.points))} px²`,
-      active: polygon.id === tool.selectedId,
-      onSelect: () => {
-        setMode("edit");
-        selectOnly("polygon");
-        setTool((current) => selectPolygon(cancelDraft(current), polygon.id));
-      },
-      onDelete: () => setTool((current) => removePolygon(current, polygon.id)),
-    })),
-    ...boxTool.boxes.map((box, index) => ({
-      key: box.id,
-      category: box.category,
-      label: `框 #${index + 1}`,
-      meta: `${Math.round(box.width)}×${Math.round(box.height)}`,
-      active: box.id === boxTool.selectedId,
-      onSelect: () => {
-        setMode("edit");
-        selectOnly("box");
-        setBoxTool((current) => ({ ...current, selectedId: box.id }));
-      },
-      onDelete: () => setBoxTool((current) => deleteBox(current, box.id)),
-    })),
-    ...keyPoints.map((point, index) => ({
-      key: point.id,
-      category: point.category,
-      label: `点 #${index + 1}`,
-      meta: `(${Math.round(point.x)}, ${Math.round(point.y)})`,
-      active: point.id === selectedPointId,
-      onSelect: () => {
-        setMode("edit");
-        selectOnly("point");
-        setSelectedPointId(point.id);
-      },
-      onDelete: () => {
-        setKeyPoints((current) => current.filter((candidate) => candidate.id !== point.id));
-        if (selectedPointId === point.id) setSelectedPointId(null);
-      },
-    })),
-  ];
-
-  const modeNote: Record<Mode, string> = {
-    edit: selectedPoint
-      ? "拖动关键点移动；Del 删除。"
-      : selectedBox
-        ? "拖动框移动，拖动控制点调整大小；Del 删除。"
-        : selectedPolygon
-          ? tool.selectedVertex !== null
-            ? `已选中第 ${tool.selectedVertex + 1} 个顶点：拖动移动，Del 删除。`
-            : "拖动顶点移动；点击边插入顶点；Del 删除该多边形。"
-          : "点击形状选中它，然后编辑；点击左侧类别显示该类全部顶点。",
-    pan: "拖动平移画布；按 V 回到编辑。",
-    draw: `逐点单击勾勒一个「${tool.category}」多边形，点回起点或按 Enter 闭合；Backspace 撤销一点。`,
-    box: `在图像上拖动，画一个「${tool.category}」框。`,
-    point: `单击图像放置一个「${tool.category}」关键点。`,
-    erase: "按住拖动擦除：范围内的关键点与多边形顶点被删除（多边形由剩下的顶点重新围成），碰到边框的框被删除。",
-  };
+  // Submitted and untouched since: nothing new to add.
+  const inDataset = source === "annotation" && autoSave.pristine;
 
   return (
     <TaskWorkspace
       fileName={imagePath}
       footer={
-        <SubmitBar
-          disabled={!imageSize}
-          error={submitError}
-          onSubmit={() => void submit()}
-          submitting={submitting}
-        >
-          <button className="button-secondary" onClick={() => void queue.reload()} type="button">
-            重新载入
-          </button>
-        </SubmitBar>
+        autoSave.error ? (
+          <div className="submit-error" role="alert">
+            <span>草稿保存失败：{autoSave.error}</span>
+            <div>
+              <button onClick={autoSave.retry} type="button">
+                重试
+              </button>
+              <button onClick={() => void queue.reload()} type="button">
+                重新载入
+              </button>
+            </div>
+          </div>
+        ) : undefined
       }
       hints={[
         { display: "拖动顶点", description: "移动顶点" },
@@ -800,31 +745,20 @@ export function PolygonReviewPage() {
       hotkeys={hotkeys}
       panel={
         <>
-          <PanelSection title="队列">
-            {viewSwitch}
-            <p className="panel-note">
-              {browsing
-                ? `已提交 ${view.offset + 1} / ${ready.queue.total}，第 ${revision} 版。保存会生成新版本，旧版本保留在历史中。`
-                : `初始内容：${SOURCE_LABELS[source] ?? source}。`}
+          {sizeMismatch && knownSize && (
+            <p className="inline-error" role="alert">
+              图片实际尺寸 {imageSize?.width}×{imageSize?.height} 与{source === "prelabel" ? "预标" : "已保存结果"}的
+              {knownSize.width}×{knownSize.height} 不一致，无法保存；请检查预标文件的 width/height。
             </p>
-            {sizeMismatch && knownSize && (
-              <p className="inline-error" role="alert">
-                图片实际尺寸 {imageSize?.width}×{imageSize?.height} 与{source === "prelabel" ? "预标" : "已保存结果"}的
-                {knownSize.width}×{knownSize.height} 不一致，保存会被拒绝；请检查预标文件的 width/height。
-              </p>
-            )}
-          </PanelSection>
+          )}
           <ClassLayers
             categories={categories}
+            counts={counts}
             current={tool.category}
-            emptyNote="还没有标注。该图没有目标时可直接保存。"
             focused={focused}
             label="标注类别"
             onPick={pickCategory}
-            onRelabel={relabel}
-            rows={layerRows}
           />
-          <p className="panel-note">{modeNote[mode]}</p>
           {notice && (
             <p className="inline-error" role="alert">
               {notice}
@@ -832,12 +766,11 @@ export function PolygonReviewPage() {
           )}
         </>
       }
-      history={{ canUndo: dirty, canRedo: history.canRedo, undo, redo }}
-      progress={summaryProgress(ready.project.summary, browsing ? undefined : ready.queue.total)}
+      history={{ canUndo: history.canUndo || Boolean(tool.draft?.length), canRedo: history.canRedo, undo, redo }}
+      progress={summaryProgress(ready.project.summary)}
       projectId={projectId}
       projectName={ready.project.name}
       rawData={result}
-      remaining={browsing ? Number(ready.project.summary.pending ?? 0) : ready.queue.total}
       stage={
         imageSize && imageUrl ? (
           <ImageCanvas
@@ -855,7 +788,40 @@ export function PolygonReviewPage() {
           <LoadingState>正在读取图像尺寸…</LoadingState>
         )
       }
-      strip={<ImageStrip dirty={dirty} projectId={projectId} queue={queue} revisable />}
+      stageAction={
+        <>
+          {queue.submitError && (
+            <div className="submit-error" role="alert">
+              <span>加入数据集失败：{queue.submitError}</span>
+              <div>
+                <button onClick={() => void submit()} type="button">
+                  重试
+                </button>
+                <button onClick={() => void queue.reload()} type="button">
+                  重新载入
+                </button>
+              </div>
+            </div>
+          )}
+          <button
+            className="primary-button"
+            disabled={!result || queue.submitting || inDataset}
+            onClick={() => void submit()}
+            type="button"
+          >
+            <span>{queue.submitting ? "正在加入…" : inDataset ? "已在数据集中" : "加入数据集"}</span>
+            <kbd aria-hidden="true">{MOD_LABEL} ↵</kbd>
+          </button>
+        </>
+      }
+      strip={
+        <ImageStrip
+          dirty={Boolean(tool.draft?.length)}
+          projectId={projectId}
+          queue={queue}
+          revisable
+        />
+      }
       title="多边形标注"
       toolOptions={
         mode === "erase" ? (

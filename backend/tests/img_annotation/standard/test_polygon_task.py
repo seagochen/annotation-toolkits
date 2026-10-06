@@ -111,7 +111,7 @@ def test_without_prelabels_every_image_starts_blank(tmp_path):
     assert queued["a.jpg"] == {
         "item_id": queued["a.jpg"]["item_id"], "image_path": "a.jpg", "revision": 0,
         "source": "none", "image_size": None, "polygons": [], "boxes": [], "points": [],
-        "annotated": False,
+        "draft": False, "annotated": False,
     }
     status = module.status(project)
     assert status.state == "reviewing"
@@ -486,3 +486,49 @@ def test_invalid_config_is_rejected(tmp_path, body, message):
     config.write_text(body, encoding="utf-8")
     with pytest.raises(TaskOperationError, match=message):
         PolygonTaskType().load(config)
+
+
+def test_a_draft_is_a_working_copy_that_submitting_replaces(tmp_path):
+    module = PolygonTaskType()
+    project = module.load(project_config(tmp_path, coco()))
+    a = items(module, project)["a.jpg"]
+    assert a["source"] == "prelabel" and a["draft"] is False
+
+    saved = module.save_draft(project, Submission(a["item_id"], result([{"category": "crack", "points": SQUARE}])))
+    assert saved["draft"] is True
+    drafts = json.loads(project.value.annotations.with_name("polygon.drafts.json").read_text(encoding="utf-8"))
+    assert list(drafts["items"]) == [a["item_id"]]
+    # The queue shows the draft, but the item is still pending and nothing is exported.
+    queued = items(module, project)["a.jpg"]
+    assert (queued["source"], queued["draft"], queued["annotated"], queued["revision"]) == ("draft", True, False, 0)
+    assert queued["polygons"] == [{"category": "crack", "points": SQUARE}]
+    assert module.status(project).details["pending"] == len(IMAGES)
+    assert not project.value.annotations.exists()
+
+    # Submitting makes it a result and drops the draft (and the empty drafts file).
+    module.submit(project, Submission(a["item_id"], result([{"category": "crack", "points": SQUARE}])))
+    queued = items(module, project)["a.jpg"]
+    assert (queued["source"], queued["draft"], queued["annotated"], queued["revision"]) == ("annotation", False, True, 1)
+    assert not project.value.annotations.with_name("polygon.drafts.json").exists()
+
+
+def test_a_draft_back_at_the_starting_point_is_dropped(tmp_path):
+    module = PolygonTaskType()
+    project = module.load(project_config(tmp_path))
+    a = items(module, project)["a.jpg"]
+    module.save_draft(project, Submission(a["item_id"], result([{"category": "crack", "points": SQUARE}])))
+    # Undone back to the blank start: no draft is kept.
+    assert module.save_draft(project, Submission(a["item_id"], result([]))) == {"item_id": a["item_id"], "draft": False}
+    assert items(module, project)["a.jpg"]["source"] == "none"
+
+
+def test_a_draft_is_validated_like_a_result(tmp_path):
+    module = PolygonTaskType()
+    project = module.load(project_config(tmp_path, coco()))
+    a = items(module, project)["a.jpg"]
+    with pytest.raises(TaskOperationError, match="unknown polygon category"):
+        module.save_draft(project, Submission(a["item_id"], result([{"category": "", "points": SQUARE}])))
+    with pytest.raises(TaskOperationError, match="does not match"):
+        module.save_draft(project, Submission(a["item_id"], result([], width=640, height=480)))
+    with pytest.raises(TaskOperationError, match="unknown polygon item"):
+        module.save_draft(project, Submission("nope", result([])))

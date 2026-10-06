@@ -9,7 +9,6 @@ import {
   RangeField,
   SubmitBar,
   TaskWorkspace,
-  type LayerRow,
 } from "../../common/workspace/TaskWorkspace";
 import { categoryColor } from "../../common/workspace/palette";
 import { BoxIcon, HandIcon, SelectIcon, ShapeEraserIcon } from "../../common/workspace/tool-icons";
@@ -248,8 +247,15 @@ export function DetectionReviewPage() {
     );
   }
 
-  /** A category row: new boxes get it and its boxes are highlighted; again to clear. */
+  /**
+   * A category row: relabels the selected box; otherwise new boxes get it
+   * and its boxes are highlighted, pressing it again clears that.
+   */
   function pickCategory(next: string) {
+    if (tool.selectedId) {
+      relabel(next);
+      return;
+    }
     setCurrentCategory(next);
     setFocused((current) => (current === next ? null : next));
     setTool((current) => ({ ...current, selectedId: null }));
@@ -349,18 +355,8 @@ export function DetectionReviewPage() {
     );
   }
 
-  const layerRows: LayerRow[] = tool.boxes.map((box, index) => ({
-    key: box.id,
-    category: box.category,
-    label: `框 #${index + 1}`,
-    meta: `${Math.round(box.width)}×${Math.round(box.height)}`,
-    active: box.id === tool.selectedId,
-    onSelect: () => {
-      setMode("select");
-      setTool((current) => ({ ...current, selectedId: box.id }));
-    },
-    onDelete: () => setTool((current) => deleteBox(current, box.id)),
-  }));
+  const counts: Record<string, number> = {};
+  for (const box of tool.boxes) counts[box.category] = (counts[box.category] ?? 0) + 1;
 
   return (
     <TaskWorkspace
@@ -377,27 +373,14 @@ export function DetectionReviewPage() {
       hotkeys={hotkeys}
       history={{ canUndo: history.canUndo, canRedo: history.canRedo, undo, redo }}
       panel={
-        <>
-          <ClassLayers
-            categories={categories}
-            current={category}
-            emptyNote="还没有框。没有目标时可直接保存。"
-            focused={focused}
-            label="检测类别"
-            onPick={pickCategory}
-            onRelabel={relabel}
-            rows={layerRows}
-          />
-          <p className="panel-note">
-            {mode === "draw"
-              ? `在图像上拖动，绘制一个「${category}」框。`
-              : mode === "pan"
-                ? "拖动平移画布；按 V 回到选择。"
-                : mode === "erase"
-                  ? "按住拖动擦除：橡皮碰到边框的框被删除。"
-                  : "点击框选中，拖动移动，拖动控制点调整大小；点击左侧类别高亮该类的框。"}
-          </p>
-        </>
+        <ClassLayers
+          categories={categories}
+          counts={counts}
+          current={category}
+          focused={focused}
+          label="检测类别"
+          onPick={pickCategory}
+        />
       }
       progress={summaryProgress(ready.project.summary, ready.queue.total)}
       projectId={projectId}

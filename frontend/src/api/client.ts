@@ -6,6 +6,7 @@ export type ProjectListItem = components["schemas"]["ProjectListItem"];
 export type ProjectDetail = components["schemas"]["ProjectDetail"];
 export type QueueResponse = components["schemas"]["QueueResponse"];
 export type AnnotationResponse = components["schemas"]["AnnotationResponse"];
+export type DraftResponse = components["schemas"]["DraftResponse"];
 export type ActionResponse = components["schemas"]["ActionResponse"];
 export type ActionListResponse = components["schemas"]["ActionListResponse"];
 
@@ -107,6 +108,25 @@ export async function submitAnnotation(
   );
   if (!response.ok || !data) {
     throw new ApiError(response.status, errorMessage(error, "无法保存审核结果"));
+  }
+  return data;
+}
+
+/** Autosave an item's working copy (task types that keep drafts); not a submission. */
+export async function saveDraft(
+  projectId: string,
+  itemId: string,
+  result: Record<string, unknown>,
+): Promise<DraftResponse> {
+  const { data, error, response } = await client.PUT(
+    "/api/projects/{project_id}/drafts",
+    {
+      params: { path: { project_id: projectId } },
+      body: { item_id: itemId, result },
+    },
+  );
+  if (!response.ok || !data) {
+    throw new ApiError(response.status, errorMessage(error, "无法保存草稿"));
   }
   return data;
 }

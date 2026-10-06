@@ -27,6 +27,7 @@ from .task_types import (
     QueueRequest,
     Submission,
     TaskActionModule,
+    TaskDraftModule,
     TaskConflictError,
     TaskOperationError,
     TaskTypeRegistry,
@@ -101,6 +102,12 @@ class TaskStatusResponse(BaseModel):
 class AnnotationResponse(BaseModel):
     item: dict[str, object]
     status: TaskStatusResponse
+
+
+class DraftResponse(BaseModel):
+    item_id: str
+    draft: bool
+    updated_at: str | None = None
 
 
 class ActionOptions(BaseModel):
@@ -375,6 +382,33 @@ def create_app(
                 "details": dict(result.status.details),
             },
         }
+
+    @application.put(
+        "/api/projects/{project_id}/drafts",
+        response_model=DraftResponse,
+        responses={
+            404: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
+    async def save_draft(project_id: str, annotation: AnnotationRequest, registry: Registry) -> dict:
+        """Autosave an item's unsubmitted working copy (task types that keep drafts)."""
+        entry = _project_entry(registry, project_id)
+        if not isinstance(entry.module, TaskDraftModule):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "drafts_not_supported",
+                    "message": "project task type does not keep drafts",
+                },
+            )
+        try:
+            return entry.module.save_draft(
+                entry.project, Submission(annotation.item_id, annotation.result)
+            )
+        except TaskOperationError as error:
+            _raise_task_error(error)
 
     @application.get(
         "/api/projects/{project_id}/actions",
