@@ -22,7 +22,7 @@ const TASK_ENTRIES = {
   depth: { label: "深度图修正", path: "depth", action: "开始深度图标注" },
 } as const satisfies Record<string, TaskEntry>;
 
-/** The task types the frontend has pages for; tasks/pages.ts must cover each. */
+/** The task types the frontend has pages for; img-annotation/pages.ts must cover each. */
 export type TaskType = keyof typeof TASK_ENTRIES;
 
 /** Task type → label, route segment and entry text: the one place they are defined. */

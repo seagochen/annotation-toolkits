@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /** A handful of 20px line icons; stroke follows `currentColor`. */
-function Icon({ children }: { children: ReactNode }) {
+export function Icon({ children }: { children: ReactNode }) {
   return (
     <svg
       aria-hidden="true"

@@ -408,7 +408,7 @@ def test_write_failure_is_reported_and_preserves_existing_decision(
     def fail_write(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr("annotation_platform.reid_task.Store.set_label", fail_write)
+    monkeypatch.setattr("annotation_platform.img_annotation.reid.reid_task.Store.set_label", fail_write)
     response = request(
         create_app(registry),
         "POST",

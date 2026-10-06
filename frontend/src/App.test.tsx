@@ -4,16 +4,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
 // Page requests, answered in order by each test. The side navigation's
-// project-list request is answered separately (see `projectList`) so that
-// it does not shift the order every test relies on.
+// project-list request and the workspace's image-list request (the queue
+// without a status filter) are answered separately (see `projectList` and
+// `itemList`) so that they do not shift the order every test relies on.
 const fetchMock = vi.fn();
 let projectList: () => Response;
+let itemList: () => Response;
 
 function routedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = input instanceof Request ? input : new Request(input, init);
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/api/projects") {
     return Promise.resolve(projectList());
+  }
+  if (request.method === "GET" && url.pathname.endsWith("/queue") && !url.searchParams.has("status")) {
+    return Promise.resolve(itemList());
   }
   return fetchMock(request);
 }
@@ -99,6 +104,7 @@ describe("project pages", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     projectList = () => response([]);
+    itemList = () => response({ total: 0, offset: 0, limit: 200, items: [] });
     vi.stubGlobal("fetch", routedFetch);
     window.localStorage.clear();
   });
@@ -745,6 +751,98 @@ describe("project pages", () => {
     getContext.mockRestore();
   });
 
+  it("lists the project's images beside the canvas and opens a pending one from the list", async () => {
+    class InstantImage {
+      onload: (() => void) | null = null;
+      naturalWidth = 100;
+      naturalHeight = 50;
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal("Image", InstantImage);
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    itemList = () =>
+      response({
+        total: 3,
+        offset: 0,
+        limit: 200,
+        items: [
+          { item_id: "a", image_path: "a.jpg", boxes: [], annotated: true },
+          { item_id: "b", image_path: "b.jpg", boxes: [], annotated: false },
+          { item_id: "c", image_path: "c.jpg", boxes: [], annotated: false },
+        ],
+      });
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          id: "yard",
+          name: "Yard",
+          task_type: "detection",
+          root: "/data/images",
+          status: "reviewing",
+          summary: { categories: ["cat"], total: 3, pending: 2 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({ total: 2, offset: 0, limit: 1, items: [{ item_id: "b", image_path: "b.jpg", boxes: [] }] }),
+      )
+      .mockResolvedValueOnce(
+        response({ total: 2, offset: 1, limit: 1, items: [{ item_id: "c", image_path: "c.jpg", boxes: [] }] }),
+      );
+
+    renderAt("/projects/yard/detect");
+    const strip = await screen.findByRole("complementary", { name: "图像列表" });
+    expect(await within(strip).findByText("2 / 3")).toBeVisible();
+    // Detection results cannot be revised, so a finished image is ticked but not openable.
+    expect(within(strip).getByRole("button", { name: "a.jpg（已标注）" })).toBeDisabled();
+    expect(within(strip).getByRole("button", { name: "b.jpg" })).toHaveAttribute("aria-current", "true");
+
+    fireEvent.click(within(strip).getByRole("button", { name: "下一张" }));
+    expect(await within(strip).findByText("3 / 3")).toBeVisible();
+    const browse = new URL((fetchMock.mock.calls[2][0] as Request).url);
+    expect(browse.searchParams.get("status")).toBe("pending");
+    expect(browse.searchParams.get("offset")).toBe("1");
+    expect(screen.getByRole("application", { name: "c.jpg" })).toBeVisible();
+    expect(within(strip).getByRole("button", { name: "下一张" })).toBeDisabled();
+    getContext.mockRestore();
+  });
+
+  it.each(["polygon", "segmentation"])("confirms before discarding an unfinished %s polygon on image navigation", async (taskType) => {
+    class InstantImage {
+      onload: (() => void) | null = null;
+      naturalWidth = 100;
+      naturalHeight = 80;
+      set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+    }
+    vi.stubGlobal("Image", InstantImage);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const items = [
+      { item_id: "p1", image_path: "a.jpg", annotated: false, polygons: [], source: "none", revision: 0 },
+      { item_id: "p2", image_path: "b.jpg", annotated: false, polygons: [], source: "none", revision: 0 },
+    ];
+    itemList = () => response({ total: 2, offset: 0, limit: 200, items });
+    fetchMock
+      .mockResolvedValueOnce(response({ id: "drafts", name: "Drafts", task_type: taskType, summary: { categories: ["cat"], total: 2, pending: 2 } }))
+      .mockResolvedValueOnce(response({ total: 2, offset: 0, limit: 1, items: [items[0]] }))
+      .mockResolvedValueOnce(response({ total: 2, offset: 1, limit: 1, items: [items[1]] }));
+    renderAt(`/projects/drafts/${taskType === "segmentation" ? "segment" : "polygon"}`);
+    const canvas = await screen.findByRole("application", { name: "a.jpg" });
+    fireEvent.keyDown(window, { key: "p" });
+    const pointer = new MouseEvent("pointerdown", { bubbles: true, clientX: 30, clientY: 30 });
+    Object.defineProperty(pointer, "pointerId", { value: 1 });
+    fireEvent(canvas, pointer);
+    const target = await screen.findByRole("button", { name: "b.jpg" });
+    fireEvent.click(target);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("application", { name: "a.jpg" })).toBeVisible();
+    confirm.mockReturnValue(true);
+    fireEvent.click(target);
+    expect(await screen.findByRole("application", { name: "b.jpg" })).toBeVisible();
+  });
+
   it("starts a polygon item from its prelabel, edits it and submits the revision it started from", async () => {
     class InstantImage {
       onload: (() => void) | null = null;
@@ -793,6 +891,8 @@ describe("project pages", () => {
 
     renderAt("/projects/walls/polygon");
     expect(await screen.findByText("初始内容：COCO 预标。")).toBeVisible();
+    // The shapes are listed under the "图层" tab of the annotation panel.
+    fireEvent.click(screen.getByRole("button", { name: "图层" }));
     expect(screen.getByRole("button", { name: /#1 material/ })).toBeVisible();
     // Select the first polygon from the list, relabel it with the digit key, delete the second.
     fireEvent.click(screen.getByRole("button", { name: /#1 material/ }));

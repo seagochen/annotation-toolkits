@@ -218,14 +218,14 @@ class TaskTypeRegistry:
 
 def default_task_types() -> TaskTypeRegistry:
     """Build the platform's built-in registry without mutable global state."""
-    from .caption_task import CaptionTaskType
-    from .classification_task import ClassificationTaskType
-    from .detection_task import DetectionTaskType
-    from .depth_task import DepthTaskType
-    from .polygon_task import PolygonTaskType
-    from .reid_task import ReIDTaskType
-    from .segmentation_task import SegmentationTaskType
-    from .text_span_task import TextSpanTaskType
+    from .img_annotation.standard.caption_task import CaptionTaskType
+    from .img_annotation.standard.classification_task import ClassificationTaskType
+    from .img_annotation.standard.detection_task import DetectionTaskType
+    from .img_annotation.depth.depth_task import DepthTaskType
+    from .img_annotation.standard.polygon_task import PolygonTaskType
+    from .img_annotation.reid.reid_task import ReIDTaskType
+    from .img_annotation.standard.segmentation_task import SegmentationTaskType
+    from .img_annotation.standard.text_span_task import TextSpanTaskType
 
     return TaskTypeRegistry(
         (

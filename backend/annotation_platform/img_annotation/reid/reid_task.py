@@ -1,0 +1,212 @@
+"""Thin task-plugin adapter for the existing ReID implementation."""
+
+from __future__ import annotations
+
+import threading
+from pathlib import Path
+from types import SimpleNamespace
+
+from reid_annotation_tool import config as reid_config
+from reid_annotation_tool.app import latest_pairs
+from reid_annotation_tool.jobs import Job, JobBusyError, JobRunner
+from reid_annotation_tool.review_store import LabelConflictError, Store
+from reid_annotation_tool.stages import BOOLEAN_OPTIONS, PLATFORM_ACTIONS
+
+from ...task_types import (
+    STATUS_EMPTY,
+    STATUS_MISSING,
+    STATUS_REVIEWED,
+    STATUS_REVIEWING,
+    ActionRecord,
+    ActionRequest,
+    ExportRequest,
+    ExportResult,
+    QueuePage,
+    QueueRequest,
+    Submission,
+    SubmissionResult,
+    TaskConflictError,
+    TaskOperationError,
+    TaskProject,
+    TaskStatus,
+)
+
+# ReID-only state: a dataset exists but `mine` has not produced a round yet.
+STATUS_NEEDS_MINING = "needs_mining"
+
+
+class ReIDTaskType:
+    type_name = "reid"
+
+    def __init__(self) -> None:
+        self._runners: dict[Path, JobRunner] = {}
+        self._runners_lock = threading.Lock()
+        self._stores: dict[tuple[Path, Path | None], Store] = {}
+        self._stores_lock = threading.Lock()
+
+    @staticmethod
+    def _project(project: TaskProject) -> reid_config.Project:
+        if not isinstance(project.value, reid_config.Project):
+            raise TaskOperationError("reid requires a ReID project configuration")
+        return project.value
+
+    def load(self, config_path: Path) -> TaskProject:
+        try:
+            project = reid_config.load(config_path)
+        except reid_config.ConfigError as error:
+            raise TaskOperationError(str(error)) from error
+        if project.dataset.exists() and not project.dataset.is_dir():
+            raise TaskOperationError(
+                f"dataset root is not a directory: {project.dataset}"
+            )
+        return TaskProject(project.path, project.dataset, project)
+
+    def _store(self, project: reid_config.Project) -> Store:
+        """One Store per live round, so its mtime caches survive across requests.
+
+        Keyed by the round file as well as the dataset: when ``mine`` opens a
+        new round, the next request gets a fresh Store for it.
+        """
+        candidates = project.live_round()
+        key = (
+            project.dataset.resolve(),
+            candidates.resolve() if candidates is not None else None,
+        )
+        with self._stores_lock:
+            store = self._stores.get(key)
+            if store is None:
+                store = Store(project.dataset, candidates)
+                self._stores[key] = store
+            return store
+
+    def queue(self, project: TaskProject, request: QueueRequest) -> QueuePage:
+        selected = self._store(self._project(project)).queue(
+            kind=request.filters.get("kind", ""),
+            split=request.filters.get("split", ""),
+            status=request.filters.get("status", ""),
+            search=request.filters.get("q", ""),
+            offset=request.offset,
+            limit=request.limit,
+        )
+        return QueuePage(
+            total=selected["total"],
+            offset=selected["offset"],
+            limit=selected["limit"],
+            items=tuple(selected["rows"]),
+        )
+
+    def submit(
+        self, project: TaskProject, submission: Submission
+    ) -> SubmissionResult:
+        reid_project = self._project(project)
+        label = submission.result.get("label")
+        if label not in {"same", "different", "unclear"}:
+            raise TaskOperationError("reid submission requires a supported `label`")
+        live_round = reid_project.live_round()
+        if live_round is None:
+            raise TaskOperationError("reid project has no review queue")
+        notes = submission.result.get("notes")
+        try:
+            item = self._store(reid_project).set_label(
+                submission.item_id,
+                str(label),
+                None if notes is None else str(notes),
+                overwrite=False,
+            )
+        except LabelConflictError as error:
+            raise TaskConflictError(str(error)) from error
+        except OSError as error:
+            raise TaskOperationError(
+                f"cannot persist queue item {submission.item_id!r}: {error}"
+            ) from error
+        if item is None:
+            raise TaskOperationError(f"unknown queue item {submission.item_id!r}")
+        return SubmissionResult(item=item, status=self.status(project))
+
+    def status(self, project: TaskProject) -> TaskStatus:
+        summary = self._project(project).summary()
+        if not summary["exists"]:
+            state = STATUS_MISSING
+        elif not summary["identities"]:
+            state = STATUS_EMPTY
+        elif not summary["live_round"]:
+            state = STATUS_NEEDS_MINING
+        else:
+            state = STATUS_REVIEWING if summary["pending"] else STATUS_REVIEWED
+        return TaskStatus(state=state, details=summary)
+
+    def export(self, project: TaskProject, request: ExportRequest) -> ExportResult:
+        reid_project = self._project(project)
+        if request.format != "native":
+            raise TaskOperationError(
+                f"reid does not support export format {request.format!r}"
+            )
+        artifact = reid_project.dataset / latest_pairs(reid_project)
+        if not artifact.is_file():
+            raise TaskOperationError("reid project has no pairs artifact to export")
+        return ExportResult(
+            format="reid-pairs-csv",
+            artifacts=(artifact,),
+            metadata={"dataset": str(reid_project.dataset)},
+        )
+
+    def action_names(self) -> tuple[str, ...]:
+        return tuple(PLATFORM_ACTIONS)
+
+    def _runner(self, project: TaskProject) -> JobRunner:
+        root = project.root.resolve()
+        with self._runners_lock:
+            runner = self._runners.get(root)
+            if runner is None:
+                runner = JobRunner(root / ".jobs")
+                self._runners[root] = runner
+            return runner
+
+    @staticmethod
+    def _record(job: Job) -> ActionRecord:
+        return ActionRecord(
+            id=job.id,
+            name=job.stage,
+            state=job.status,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            log=tuple(job.log),
+            result=job.result,
+            error=job.error,
+        )
+
+    def start_action(
+        self, project: TaskProject, request: ActionRequest
+    ) -> ActionRecord:
+        if request.name not in PLATFORM_ACTIONS:
+            raise TaskOperationError(f"unknown reid action {request.name!r}")
+        unknown = sorted(set(request.options) - PLATFORM_ACTIONS[request.name])
+        if unknown:
+            raise TaskOperationError(
+                f"unsupported options for {request.name!r}: {unknown}"
+            )
+        for key, value in request.options.items():
+            if not isinstance(value, bool):
+                raise TaskOperationError(f"action option {key!r} must be boolean")
+        # Stage functions may read any boolean option, as they would from the
+        # CLI; the ones this action does not accept stay False.
+        args = SimpleNamespace(
+            **{name: bool(request.options.get(name, False)) for name in BOOLEAN_OPTIONS}
+        )
+        try:
+            job = self._runner(project).start(
+                request.name, self._project(project), args
+            )
+        except JobBusyError as error:
+            raise TaskConflictError(str(error)) from error
+        except (OSError, ValueError) as error:
+            raise TaskOperationError(str(error)) from error
+        return self._record(job)
+
+    def list_actions(self, project: TaskProject) -> tuple[ActionRecord, ...]:
+        return tuple(self._record(job) for job in self._runner(project).list())
+
+    def get_action(self, project: TaskProject, action_id: str) -> ActionRecord | None:
+        job = self._runner(project).get(action_id)
+        return self._record(job) if job is not None else None

@@ -6,16 +6,23 @@
 |---|---|
 | [`App.tsx`](../../frontend/src/App.tsx) | 左侧导航 + 右侧工作区的外壳，`wouter` 路由表（§2） |
 | [`api/client.ts`](../../frontend/src/api/client.ts) | 基于生成的 OpenAPI 类型（`api/schema.d.ts`）的类型安全 API 客户端 |
-| [`components/image-canvas/`](../../frontend/src/components/image-canvas/) | 与具体任务无关的共享画布图元（§5） |
-| [`components/workspace/`](../../frontend/src/components/workspace/) | 全部任务页共用的工作台布局、页面级快捷键（`useHotkeys`）与类别配色（§6） |
 | [`components/shell/`](../../frontend/src/components/shell/) | 侧边导航（`SideNav`）、新建项目的任务类型弹窗、全局项目列表上下文（`ProjectsContext`）、线条图标 |
 | [`components/settings/`](../../frontend/src/components/settings/) | 按后端字段描述（`/api/task-types` 的 `fields`）渲染的通用属性表单 |
 | [`components/AsyncState.tsx`](../../frontend/src/components/AsyncState.tsx) | 通用加载中/错误态展示组件 |
 | [`project-meta.ts`](../../frontend/src/project-meta.ts) | 状态/任务类型的中文名、任务入口路径、由 `summary` 计算进度 |
 | [`pages/`](../../frontend/src/pages/) | 首页（新建项目入口）、新建项目属性页、画布 demo |
 | [`pages/project/`](../../frontend/src/pages/project/) | 项目 dashboard：概览、导入数据、属性、导出 |
-| [`tasks/<type>/`](../../frontend/src/tasks/) | 每种任务类型一个目录，一个 `*ReviewPage.tsx` |
-| [`tasks/useImageSize.ts`](../../frontend/src/tasks/useImageSize.ts) | 检测/分割/深度共用：提交前用一张隐藏 `Image` 预探测图片像素尺寸 |
+| [`img-annotation/`](../../frontend/src/img-annotation/) | 标注工具，按工具类别分层（见下表）；[`pages.ts`](../../frontend/src/img-annotation/pages.ts) 是任务类型 → 标注页的路由表 |
+
+标注工具源码按工具类别分层（新增一类工具时在 `img-annotation/` 下新开一个目录，
+如以后的 `3dbbox/`；某类工具专用的代码不放进 `common/`）：
+
+| 目录 | 内容 |
+|---|---|
+| [`img-annotation/common/`](../../frontend/src/img-annotation/common/) | 各类工具共用：[`image-canvas/`](../../frontend/src/img-annotation/common/image-canvas/)（与任务无关的画布图元，§5）、[`workspace/`](../../frontend/src/img-annotation/common/workspace/)（工作台布局、工具栏、撤销/重做、页面级快捷键 `useHotkeys`、类别配色，§6）、`useTaskQueue`（队列循环，§4）、`ImageStrip`（图像列表）、`ItemStage`（图片/文本舞台）、`useImageSize`（预探测图片像素尺寸） |
+| [`img-annotation/standard/`](../../frontend/src/img-annotation/standard/) | 通用传统标注：`classification/`、`caption/`、`detection/`、`segmentation/`、`polygon/`、`text-span/`（含纯函数 `text-span.ts`），各一个 `*ReviewPage.tsx` |
+| [`img-annotation/reid/`](../../frontend/src/img-annotation/reid/) | ReID / 相似度成对审核页与项目页上的 ReID 动作面板 |
+| [`img-annotation/depth/`](../../frontend/src/img-annotation/depth/) | 深度图标注页 |
 
 **运行进程**：浏览器；开发时由 Vite 提供，生产构建产物可由后端通过
 `ANNOTATION_FRONTEND_DIST` 同源托管（Docker 镜像即如此），也可由任意静态文件服务器
@@ -52,7 +59,7 @@
 
 `task_type` 到路由路径、名称与入口文案的映射只在 `project-meta.ts` 的
 `taskEntries` 定义一次：导航、概览页的入口链接和 `App.tsx` 的标注页路由都由它生成。
-每种任务的页面组件登记在 `tasks/pages.ts` 的 `taskPages`，它以 `TaskType`
+每种任务的页面组件登记在 `img-annotation/pages.ts` 的 `taskPages`，它以 `TaskType`
 （`taskEntries` 的键）为键，漏登记或多登记都无法通过类型检查。新增任务类型 = 在
 `taskEntries` 加一行 + 在 `taskPages` 登记页面。
 
@@ -78,7 +85,7 @@ flowchart LR
     ShowError --> Render
 ```
 
-这个循环只实现一次：`tasks/useTaskQueue.tsx` 的 `useTaskQueue(projectId, { taskType,
+这个循环只实现一次：`img-annotation/common/useTaskQueue.tsx` 的 `useTaskQueue(projectId, { taskType,
 wrongType, onLoad })` 并行读取项目与待处理队列、拒绝其他任务类型的项目、在提交成功后
 重新读取队列，并持有 `submitting`/`submitError`；`QueueFallback` 渲染加载、错误（可
 重试）与"已完成"三种状态；`itemText`、`summaryStrings` 是读取队列项与项目摘要的共享
@@ -88,10 +95,10 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 `DetectionReviewPage.tsx`/`SegmentationReviewPage.tsx`/`DepthReviewPage.tsx` 在
 "渲染标注界面"这一步额外挂载 `ImageCanvas` + 对应的画布图元。
 
-## 5. 共享图像画布图元（`components/image-canvas/`）
+## 5. 共享图像画布图元（`img-annotation/common/image-canvas/`）
 
 坐标系、图层合成、指针事件和快捷键的完整契约见该目录自己的
-[`README.md`](../../frontend/src/components/image-canvas/README.md)（本文档不重复，
+[`README.md`](../../frontend/src/img-annotation/common/image-canvas/README.md)（本文档不重复，
 理由见 [`00_概述.md`](00_概述.md) §1.1）。三个画布任务各自复用的图元：
 
 | 图元 | 被谁用 | 关键点 |
@@ -112,32 +119,59 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 该图片元素必须设置 `crossOrigin = "anonymous"`，否则前后端不同源时画布会被浏览器
 标记为"污染"、无法读取像素，见 [`10_通用设计.md`](10_通用设计.md) §3。
 
-## 6. 标注工作台（`components/workspace/`）
+## 6. 标注工作台（`img-annotation/common/workspace/`）
 
-所有任务页（含 ReID 审核）都渲染同一个 `TaskWorkspace`：
+所有任务页（含 ReID 审核）都渲染同一个 `TaskWorkspace`，布局参照 Roboflow 的标注界面，
+从左到右四栏（进入标注页时全局 `SideNav` 固定为图标栏，`compact`，不改用户保存的偏好）：
 
 | 区域 | 内容 |
 |---|---|
-| 顶栏（工作区内） | 返回项目、任务名、当前文件名、进度条（`已完成 / 总数`）、剩余数（`.queue-count`） |
-| 舞台 | 画布、图片或文本，占满工作区剩余高度，页面本身不滚动；文本条目（`media: "text"`）由 `tasks/ItemStage.tsx` 的 `TextDocument` 显示为可在舞台内滚动的文档（保留空白与换行），`text_error` 原样显示 |
-| 侧栏 | 类别/工具等面板（`PanelSection`、`OptionList`、`Segmented`、`RangeField`），可折叠的快捷键列表；底部固定 `SubmitBar`（保存按钮、禁用原因、保存失败与重试） |
+| 左栏 | 顶部：返回项目、`项目名 · 任务名`（`h1` 只含任务名）、当前文件名。其下一列图标页签切换面板：**标注**（页面的 `panel`）、**快捷键**（`hotkeys` + `hints`）、**原始数据**（页面传 `rawData` 时出现，显示将要提交的 `result`）。底部固定：进度条（`已完成 / 总数`）、剩余数（`.queue-count`）与 `SubmitBar`（保存按钮、禁用原因、保存失败与重试） |
+| 舞台 | 画布、图片或文本，占满剩余高度，页面本身不滚动；文本条目（`media: "text"`）由 `img-annotation/common/ItemStage.tsx` 的 `TextDocument` 显示为可在舞台内滚动的文档（保留空白与换行），`text_error` 原样显示。`ImageCanvas` 左下角是缩放条（`−` 比例 `+` 适应） |
+| 工具栏 | 画布页传 `tools`（分组的按钮：图标、名称、快捷键）与 `history`（撤销/重做）时，舞台右上角浮出竖向工具栏；`toolOptions`（画笔半径等当前工具的设置）浮在工具栏左侧 |
+| 图像列表 | 页面传 `strip` 时的最右栏：`img-annotation/common/ImageStrip.tsx`，见下 |
+
+左栏面板内的组件：`PanelSection`、`OptionList`、`Segmented`、`RangeField`；检测与多边形
+用 `AnnotationTabs` 把"类别"（带本图计数的类别图例）与"图层"（本图的框/多边形列表，
+可选中、删除）放在"标注 N"下的两个页签里。
+
+**图像列表**（`ImageStrip`，ReID 之外的任务页都有）：不带 `status` 分页读取全部条目
+（每页 200，"加载更多"续读），每项一张缩略图（文本条目为文档图标）、文件名，已完成的
+（队列 item 的 `annotated`，或本次访问中保存过的 `useTaskQueue().savedIds`）打勾。
+标题下 `‹ N / M ›` 显示当前条目在全部条目中的位置并跳到上/下一个可打开的条目。
+点击未完成条目 = `browse({ status: "pending", offset: 它之前的未完成条目数 })`；已完成
+条目只在结果可修改的任务（多边形，`revisable`）中可打开（`status: "annotated"`），其他
+任务里禁用。当前条目有未保存的修改（页面传 `dirty`，画布页即"有可撤销的步骤"）时，
+跳转前确认。从队列中间保存了最后一个待标注条目时，`useTaskQueue` 回到 `offset 0`
+继续。页面在条目变化时用 `useResetOnItem(item_id, reset)` 在渲染中重置自己的状态
+（而不是在 `onLoad`/提交成功后），所以从列表跳转与保存后前进走同一条路径。
+
+**撤销/重做**（`useEditHistory`）：保存整份编辑状态的快照栈。检测与多边形用
+`useRecordChanges` 记录框/多边形数组每次"落定"的值（拖动中传 `null`，一次拖动算一步；
+撤销恢复的值经 `markApplied` 标记，不再重复记录）；分割与深度的像素是原地修改的，
+所以在每一笔（`pointerdown`）和每次多边形填充前 `record(cloneRasterBuffer(raster))`，
+最多 20 步。绘制多边形途中，撤销先撤回草稿的最后一点。换条目时历史清空。
+
+`useImageSize(src)` 返回的尺寸以 `src` 为键：条目刚切换时返回 `null` 而不是上一张图的
+尺寸，避免掩膜按旧尺寸分配。
 
 进度由 `project-meta.ts` 的 `summaryProgress()` 计算：图像任务取 `summary.total`，
 ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`（队列在每次提交后
 刷新，`summary` 只在进入页面时读取一次）。
 
-**页面级快捷键**（`useHotkeys`）挂在 `window` 上，不要求画布聚焦；在文本输入框中
+**页面级快捷键**（`useHotkeys`）挂在 `window` 上（键名小写；按住 Ctrl/⌘ 时为 `mod+键`，再按 Shift 为 `mod+shift+键`），不要求画布聚焦；在文本输入框中
 不触发（`allowInText` 的绑定除外），聚焦按钮时不拦截 Enter/空格。`ImageCanvas` 自带的
 缩放/平移键（`+`/`-`/`0`/方向键/空格拖动）仍只在画布聚焦时生效。
 
 | 页面 | 快捷键 |
 |---|---|
 | 全部（ReID 除外） | `Ctrl/⌘ + Enter` 保存并继续（描述页在输入框内也可用） |
+| 全部画布页 | `H` 拖动画布工具、`Ctrl/⌘ + Z` 撤销、`Ctrl/⌘ + Shift + Z` 或 `Ctrl/⌘ + Y` 重做 |
 | 分类 | `1`–`9` 选择/切换第 N 个标签 |
 | 文本片段 | 拖选文本新建片段（当前标签）、`1`–`9` 选择标签（选中片段时改为该标签）、`Del`/`Backspace` 删除选中片段、`Esc` 取消选中 |
-| 检测 | `1`–`9` 选择类别（选中框时改为该类别）、`B` 绘制新框、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中 |
+| 检测 | `1`–`9` 选择类别（选中框时改为该类别）、`V` 选择、`B` 绘制新框、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中 |
 | 分割 | `1`–`9` 选择类别、`B` 画笔、`E` 橡皮、`P` 多边形、`[`/`]` 画笔半径、`Enter` 闭合多边形、`Backspace` 撤销最后一点、`Esc` 放弃多边形 |
-| 多边形 | `1`–`9` 选择类别（选中多边形时改为该类别）、`P` 绘制新多边形/回到编辑、`Enter` 闭合、`Backspace` 绘制时撤销一点（编辑时同 Del）、`Del` 删除选中顶点（未选顶点时删除多边形）、`Esc` 放弃绘制/取消选中；拖动顶点移动，点击选中多边形的边插入顶点 |
+| 多边形 | `1`–`9` 选择类别（选中多边形时改为该类别）、`V` 选择、`P` 绘制新多边形/回到编辑、`Enter` 闭合、`Backspace` 绘制时撤销一点（编辑时同 Del）、`Del` 删除选中顶点（未选顶点时删除多边形）、`Esc` 放弃绘制/取消选中；拖动顶点移动，点击选中多边形的边插入顶点 |
 | 深度 | `1` 提高、`2` 降低、`X` 切换方向、`[`/`]` 画笔半径 |
 | ReID | `1` 同一人、`2` 不同人、`3` 不确定（按下即提交） |
 
@@ -145,7 +179,7 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 检测框、分割掩膜、文本片段与侧栏色块共用，保证画布与图例一致。分割掩膜值 `N` 对应第 `N` 个
 类别（`categoryColor(N - 1)`），`0` 为背景。
 
-## 7. 文本片段标注（`components/text-span/`、`tasks/text-span/`）
+## 7. 文本片段标注（`img-annotation/standard/text-span/`、`img-annotation/standard/text-span/`）
 
 `text-span.ts` 是纯函数（有单测）：`CodePointIndex` 在 UTF-16 下标与 code point 之间
 换算（后端 offset 为 code point）；`selectionToRange()` 把一次 DOM 选区换成去掉首尾
@@ -155,13 +189,13 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 `Range.toString().length` 求 UTF-16 偏移（不依赖段落结构），单击已标注文字选中
 最内层片段。
 
-## 8. 多边形标注（`tasks/polygon/`）
+## 8. 多边形标注（`img-annotation/standard/polygon/`）
 
 `PolygonReviewPage` 以队列条目的 `polygons`（已提交结果或预标）初始化
 `polygon-tool.ts` 的状态，按条目的 `item_id` + `revision` + `source` 判断是否需要
 重新初始化。提交带上条目的 `revision` 作为 `base_revision`，409 时提示并提供
 "重新载入"。`useTaskQueue` 的 `browse({ status, offset })` 让页面在"待标注"与
-"已提交"之间切换并逐张翻页（`status=annotated&offset=N&limit=1`），于是已提交的
+"已提交"之间切换，并从图像列表打开任意一张（`status=annotated&offset=N&limit=1`），于是已提交的
 结果可以再次修改、生成新版本。浏览器加载出的图片尺寸与预标/已保存结果的尺寸不一致
 时，侧栏提示（后端会拒绝这种提交）。项目概览页把 `summary.prelabel_issues` 渲染为
 "未加载的预标"表格。
