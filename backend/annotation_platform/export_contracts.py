@@ -331,7 +331,7 @@ def _detection_annotation(annotation: dict, where: str, context: dict) -> None:
 
 
 def _polygon_annotation(annotation: dict, where: str, context: dict) -> None:
-    from .polygon_task import bounding_box, shoelace_area
+    from .img_annotation.standard.polygon_task import bounding_box, shoelace_area
 
     _object_annotation(annotation, where, context)
     segmentation = annotation.get("segmentation")

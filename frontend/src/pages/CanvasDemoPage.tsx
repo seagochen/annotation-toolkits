@@ -5,7 +5,7 @@ import {
   ImageCanvas,
   type ImageCanvasLayer,
   type ImageCanvasPointerEvent,
-} from "../components/image-canvas";
+} from "../img-annotation/common/image-canvas";
 
 export function CanvasDemoPage() {
   const [mode, setMode] = useState<"pan" | "tool">("pan");

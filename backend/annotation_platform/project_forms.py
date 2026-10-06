@@ -19,8 +19,8 @@ from typing import Literal, Mapping
 
 from .export_contracts import contract_for
 from .file_kinds import KIND_SUFFIXES
-from .image_dataset import DEFAULT_PATTERNS
-from .text_span_task import DEFAULT_PATTERNS as TEXT_SPAN_PATTERNS
+from .img_annotation.common.image_dataset import DEFAULT_PATTERNS
+from .img_annotation.standard.text_span_task import DEFAULT_PATTERNS as TEXT_SPAN_PATTERNS
 
 FieldType = Literal["text", "path", "integer", "number", "boolean", "select", "list"]
 LockRule = Literal["none", "append_only", "locked"]

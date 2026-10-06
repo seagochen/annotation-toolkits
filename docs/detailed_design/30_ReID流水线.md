@@ -56,7 +56,7 @@ flowchart LR
 ## 3. 接口一览
 
 作为平台任务类型使用时，ReID 通过 `ReIDTaskType`
-（[`reid_task.py`](../../backend/annotation_platform/reid_task.py)，属于
+（[`reid_task.py`](../../backend/annotation_platform/img_annotation/reid/reid_task.py)，属于
 [`20_标注平台后端.md`](20_标注平台后端.md) 子系统）适配到标准的
 `load/queue/submit/status/export` 五个方法，`submit`/`queue` 直接委托给
 [`review_store.py`](../../backend/reid_annotation_tool/review_store.py)；额外的

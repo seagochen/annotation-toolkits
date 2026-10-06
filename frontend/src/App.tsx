@@ -10,7 +10,7 @@ import { ProjectImportPage } from "./pages/project/ProjectImportPage";
 import { ProjectOverviewPage } from "./pages/project/ProjectOverviewPage";
 import { ProjectSettingsPage } from "./pages/project/ProjectSettingsPage";
 import { taskEntries } from "./project-meta";
-import { taskPages } from "./tasks/pages";
+import { taskPages } from "./img-annotation/pages";
 
 const ANNOTATION_PATH = new RegExp(
   `^/projects/[^/]+/(${Object.values(taskEntries).map((entry) => entry.path).join("|")})$`,
