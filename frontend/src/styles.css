@@ -17,6 +17,7 @@
   --danger-soft: #f5ddd4;
   --focus: #d28c55;
   --stage: #111814;
+  --stage-light: #e7eae3;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   color: var(--ink);
@@ -34,8 +35,9 @@ button { font: inherit; }
 
 /* --- shell: narrow side navigation + work area ------------------------------ */
 .app-shell { display: grid; grid-template-columns: auto minmax(0, 1fr); min-height: 100vh; }
+.app-shell.annotating { grid-template-columns: minmax(0, 1fr); }
 main { min-width: 0; padding: 32px clamp(16px, 4vw, 48px) 64px; }
-/* Annotation pages take the whole work area; see components/workspace. */
+/* Annotation pages take the whole work area; see img-annotation/common/workspace. */
 main.main-wide { padding: 0; }
 main.main-wide > .state-panel { max-width: 960px; margin: 40px auto; }
 

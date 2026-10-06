@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 
 import { taskEntries, taskLabel } from "../../project-meta";
-import { categoryColor } from "../workspace/palette";
+import { categoryColor } from "../../img-annotation/common/workspace/palette";
 import {
   AnnotateIcon,
   CollapseIcon,

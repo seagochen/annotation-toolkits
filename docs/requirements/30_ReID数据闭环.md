@@ -6,7 +6,7 @@
 
 **确认情况**：现有文档基线及当前实现行为。操作者配置可用流水线、输入数据和所需模型后，抽取可审核数据并挖掘候选；标注者查看候选图像，提交同一人、不同人或不确定判定及备注。相似度只用于辅助排序，不能直接作为身份真值。无审核轮次或未知候选的提交被拒绝。已保存的判定不能在平台上修改；更正通过后续审核轮次重新作答完成，合并审核轮次时同一关系以最新一轮的回答为准。
 
-**依据**：[extract.py](../../backend/reid_annotation_tool/extract.py)、[mine.py](../../backend/reid_annotation_tool/mine.py) 与 [ReIDTaskType.submit](../../backend/annotation_platform/reid_task.py)。**验收**：[AC-008](90_验收标准.md#ac-008)。
+**依据**：[extract.py](../../backend/reid_annotation_tool/extract.py)、[mine.py](../../backend/reid_annotation_tool/mine.py) 与 [ReIDTaskType.submit](../../backend/annotation_platform/img_annotation/reid/reid_task.py)。**验收**：[AC-008](90_验收标准.md#ac-008)。
 
 ## FR-009 关系检查与数据定版
 
@@ -24,4 +24,4 @@
 
 **确认情况**：当前实现行为。平台支持的动作由任务能力列表决定，操作者可启动动作并查询状态、日志、结果或错误。同一后端进程已有动作执行时，新动作应得到忙碌反馈，不形成自动排队承诺。进程重启后中断记录应显示失败，不自动恢复执行。
 
-**依据**：[ReIDTaskType](../../backend/annotation_platform/reid_task.py) `action_names`、`start_action`；[JobRunner](../../backend/reid_annotation_tool/jobs.py)。**验收**：[AC-011](90_验收标准.md#ac-011)。
+**依据**：[ReIDTaskType](../../backend/annotation_platform/img_annotation/reid/reid_task.py) `action_names`、`start_action`；[JobRunner](../../backend/reid_annotation_tool/jobs.py)。**验收**：[AC-011](90_验收标准.md#ac-011)。

@@ -10,7 +10,7 @@ import { ProjectImportPage } from "./pages/project/ProjectImportPage";
 import { ProjectOverviewPage } from "./pages/project/ProjectOverviewPage";
 import { ProjectSettingsPage } from "./pages/project/ProjectSettingsPage";
 import { taskEntries } from "./project-meta";
-import { taskPages } from "./tasks/pages";
+import { taskPages } from "./img-annotation/pages";
 
 const ANNOTATION_PATH = new RegExp(
   `^/projects/[^/]+/(${Object.values(taskEntries).map((entry) => entry.path).join("|")})$`,
@@ -29,14 +29,16 @@ function NotFoundPage() {
 }
 
 export function App() {
-  // Annotation pages are full-bleed tools; every other page is a padded
-  // document in the work area.
+  // Annotation pages are full-bleed tools without the app navigation (their
+  // workspace header links back to the project); every other page is a
+  // padded document beside the navigation.
   const [location] = useLocation();
+  const annotating = ANNOTATION_PATH.test(location);
   return (
     <ProjectsProvider>
-      <div className="app-shell">
-        <SideNav />
-        <main className={ANNOTATION_PATH.test(location) ? "main-wide" : undefined}>
+      <div className={annotating ? "app-shell annotating" : "app-shell"}>
+        {!annotating && <SideNav />}
+        <main className={annotating ? "main-wide" : undefined}>
           <Switch>
             <Route path="/" component={HomePage} />
             <Route path="/new/:taskType" component={ProjectCreatePage} />

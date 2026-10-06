@@ -9,7 +9,7 @@ ReID 负责将流水线输出组织成候选、人工关系、检查报告与可
 | 协作对象 | 输入与输出 | 契约归属 |
 |---|---|---|
 | 用户流水线 | 输入视频/配置，输出符合抽取约定的记录与裁剪来源 | [contract.py](../../backend/reid_annotation_tool/contract.py) |
-| 通用标注平台 | 队列、判定、状态、导出与可选动作 | [reid_task.py](../../backend/annotation_platform/reid_task.py) `ReIDTaskType` |
+| 通用标注平台 | 队列、判定、状态、导出与可选动作 | [reid_task.py](../../backend/annotation_platform/img_annotation/reid/reid_task.py) `ReIDTaskType` |
 | CLI | 直接调用同一组领域阶段 | [app.py](../../backend/reid_annotation_tool/app.py) `DISPATCH` |
 | 外部训练工程 | 数据引用和训练配置，返回进程结果及产物 | [handoff.py](../../backend/reid_annotation_tool/handoff.py) `train`、`evaluate` |
 

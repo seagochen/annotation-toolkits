@@ -3,7 +3,7 @@ import { Link, useParams } from "wouter";
 
 import { AnnotateIcon, ExportIcon, ImportIcon, SettingsIcon } from "../../components/shell/icons";
 import { summaryProgress, taskEntries } from "../../project-meta";
-import { ReIDActions } from "../../tasks/reid/ReIDActions";
+import { ReIDActions } from "../../img-annotation/reid/ReIDActions";
 import { ProjectHeader, ProjectStateGate } from "./ProjectHeader";
 import { useProject } from "./useProject";
 

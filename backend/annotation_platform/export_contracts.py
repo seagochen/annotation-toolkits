@@ -111,12 +111,12 @@ def _one_file(paths: tuple[Path, ...], name: str) -> Path:
 # ------------------------------------------------------- JSON sidecars
 
 
-def _sidecar(item_check: Callable[[dict, str], None]) -> Callable[[object], None]:
-    """The ``{schema: 1, items: {item_id: ...}, history: [...]}`` native document."""
+def _sidecar(item_check: Callable[[dict, str], None], schema: int = 1) -> Callable[[object], None]:
+    """The ``{schema, items: {item_id: ...}, history: [...]}`` native document."""
 
     def validate(document: object) -> None:
         root = _mapping(document, "document", ("schema", "items", "history"))
-        _require(root["schema"] == 1, "schema", "must be 1")
+        _require(root["schema"] == schema, "schema", f"must be {schema}")
         _require(isinstance(root["items"], dict), "items", "must be an object keyed by item_id")
         _require(isinstance(root["history"], list), "history", "must be a list")
         for item_id, item in root["items"].items():
@@ -185,7 +185,7 @@ def _polygon_points(points: object, where: str) -> None:
 
 def _polygons_item(item: dict, where: str) -> None:
     _mapping(item, where, ("image_size", "polygons", "revision"))
-    _size(item["image_size"], f"{where}.image_size")
+    size = _size(item["image_size"], f"{where}.image_size")
     _require(_is_int(item["revision"]) and item["revision"] >= 1, where, "revision must be >= 1")
     _require(isinstance(item["polygons"], list), where, "polygons must be a list")
     for index, polygon in enumerate(item["polygons"]):
@@ -193,6 +193,35 @@ def _polygons_item(item: dict, where: str) -> None:
         _mapping(polygon, at, ("category", "points"))
         _require(isinstance(polygon["category"], str), at, "category must be text")
         _polygon_points(polygon["points"], at)
+    return size
+
+
+def _shapes_item(item: dict, where: str) -> None:
+    """polygon-json/v2: polygons plus boxes and keypoints."""
+    size = _polygons_item(item, where)
+    _mapping(item, where, ("boxes", "points"))
+    _require(isinstance(item["boxes"], list), where, "boxes must be a list")
+    for index, box in enumerate(item["boxes"]):
+        at = f"{where}.boxes[{index}]"
+        _mapping(box, at, ("category", "x", "y", "width", "height"))
+        _require(isinstance(box["category"], str), at, "category must be text")
+        _require(
+            all(_is_number(box[key]) for key in ("x", "y", "width", "height"))
+            and box["width"] > 0 and box["height"] > 0
+            and box["x"] >= 0 and box["y"] >= 0
+            and box["x"] + box["width"] <= size["width"] and box["y"] + box["height"] <= size["height"],
+            at, "x/y/width/height must be finite, with a positive size inside the image",
+        )
+    _require(isinstance(item["points"], list), where, "points must be a list")
+    for index, point in enumerate(item["points"]):
+        at = f"{where}.points[{index}]"
+        _mapping(point, at, ("category", "x", "y"))
+        _require(isinstance(point["category"], str), at, "category must be text")
+        _require(
+            _is_number(point["x"]) and _is_number(point["y"])
+            and 0 <= point["x"] <= size["width"] and 0 <= point["y"] <= size["height"],
+            at, "x/y must be finite and inside the image",
+        )
 
 
 def _raster_item(file_key: str, optional: tuple[str, ...] = ()) -> Callable[[dict, str], None]:
@@ -268,13 +297,15 @@ def _reid_pairs_csv(paths: tuple[Path, ...]) -> None:
 # ----------------------------------------------------------------- COCO
 
 
-def _coco(name: str, annotation_check: Callable[[dict, str, dict], None]) -> Callable[[object], None]:
+def _coco(name: str, annotation_check: Callable[[dict, str, dict], None],
+          version: int = 1) -> Callable[[object], None]:
     """Shared COCO structure; ``info.version`` names the contract."""
 
     def validate(document: object) -> None:
         root = _mapping(document, "document", ("info", "images", "annotations", "categories"))
         info = _mapping(root["info"], "info", ("version",))
-        _require(info["version"] == f"{name}/v1", "info.version", f"must be {name}/v1")
+        contract_id = f"{name}/v{version}"
+        _require(info["version"] == contract_id, "info.version", f"must be {contract_id}")
         for key in ("images", "annotations", "categories"):
             _require(isinstance(root[key], list), key, "must be a list")
         images: dict[int, dict] = {}
@@ -295,7 +326,13 @@ def _coco(name: str, annotation_check: Callable[[dict, str, dict], None]) -> Cal
             )
             _require(isinstance(category["name"], str), where, "name must be text")
             categories.add(category["id"])
-        context = {"images": images, "categories": categories, "ids": set()}
+        context = {
+            "images": images, "categories": categories, "ids": set(),
+            "keypoint_categories": {
+                category["id"] for category in root["categories"]
+                if category.get("keypoints") == ["point"]
+            },
+        }
         for index, annotation in enumerate(root["annotations"]):
             where = f"annotations[{index}]"
             _mapping(annotation, where, ("image_id",))
@@ -331,7 +368,7 @@ def _detection_annotation(annotation: dict, where: str, context: dict) -> None:
 
 
 def _polygon_annotation(annotation: dict, where: str, context: dict) -> None:
-    from .polygon_task import bounding_box, shoelace_area
+    from .img_annotation.standard.polygon_task import bounding_box, shoelace_area
 
     _object_annotation(annotation, where, context)
     segmentation = annotation.get("segmentation")
@@ -361,6 +398,44 @@ def _polygon_annotation(annotation: dict, where: str, context: dict) -> None:
     )
 
 
+def _shape_annotation(annotation: dict, where: str, context: dict) -> None:
+    """polygon-coco/v2: a polygon (one ring), a box (no segmentation) or a keypoint."""
+    if annotation.get("segmentation"):
+        _polygon_annotation(annotation, where, context)
+        return
+    _object_annotation(annotation, where, context)
+    _require(annotation.get("segmentation") == [], where, "a box or keypoint has segmentation []")
+    image = context["images"][annotation["image_id"]]
+    x, y, width, height = annotation["bbox"]
+    if "keypoints" not in annotation:
+        _require(width > 0 and height > 0, where, "a box must have a positive size")
+        _require(
+            x >= 0 and y >= 0 and x + width <= image["width"] and y + height <= image["height"],
+            where, "a box must lie inside the image",
+        )
+        _require(math.isclose(annotation["area"], width * height, rel_tol=1e-9), where, "area must be width*height")
+        return
+    keypoints = annotation["keypoints"]
+    _require(
+        isinstance(keypoints, list) and len(keypoints) == 3
+        and _is_number(keypoints[0]) and _is_number(keypoints[1]) and keypoints[2] == 2,
+        where, "keypoints must be one labelled point [x, y, 2]",
+    )
+    _require(annotation.get("num_keypoints") == 1, where, "num_keypoints must be 1")
+    _require(
+        0 <= keypoints[0] <= image["width"] and 0 <= keypoints[1] <= image["height"],
+        where, "the keypoint must lie inside the image",
+    )
+    _require(
+        [x, y, width, height] == [keypoints[0], keypoints[1], 0, 0] and annotation["area"] == 0,
+        where, "a keypoint's bbox is [x, y, 0, 0] and its area 0",
+    )
+    _require(
+        annotation["category_id"] in context["keypoint_categories"],
+        where, 'the category must declare keypoints ["point"]',
+    )
+
+
 def _mask_annotation(annotation: dict, where: str, context: dict) -> None:
     _require(
         isinstance(annotation.get("segmentation_mask"), str),
@@ -372,8 +447,9 @@ def _mask_annotation(annotation: dict, where: str, context: dict) -> None:
 
 
 def _contract(name: str, summary: str, document: Callable[[object], None],
-              files: Callable[[tuple[Path, ...]], None] | None = None) -> ExportContract:
-    return ExportContract(name, 1, files or _json_contract(document), document, summary)
+              files: Callable[[tuple[Path, ...]], None] | None = None,
+              version: int = 1) -> ExportContract:
+    return ExportContract(name, version, files or _json_contract(document), document, summary)
 
 
 def _no_document(name: str) -> Callable[[object], None]:
@@ -387,7 +463,8 @@ _SEGMENTATION_INDEX = _sidecar(_raster_item("mask_path"))
 _DEPTH_INDEX = _sidecar(_raster_item("depth_path", ("baseline_path",)))
 _DETECTION_COCO = _coco("detection-coco", _detection_annotation)
 _SEGMENTATION_COCO = _coco("segmentation-coco", _mask_annotation)
-_POLYGON_COCO = _coco("polygon-coco", _polygon_annotation)
+_POLYGON_COCO_V1 = _coco("polygon-coco", _polygon_annotation)
+_POLYGON_COCO = _coco("polygon-coco", _shape_annotation, version=2)
 
 _NATIVE = ("native", "json")
 
@@ -424,10 +501,12 @@ _register("segmentation", ("coco",), _contract(
     "segmentation-coco", "COCO 兼容：annotations 以 segmentation_mask 引用掩膜 PNG",
     _SEGMENTATION_COCO))
 _register("polygon", _NATIVE, _contract(
-    "polygon-json", "JSON 侧车：items[item_id] = {image_path, image_size, polygons, revision}",
-    _sidecar(_polygons_item)))
+    "polygon-json",
+    "JSON 侧车（schema 2）：items[item_id] = {image_path, image_size, polygons, boxes, points, revision}",
+    _sidecar(_shapes_item, schema=2), version=2))
 _register("polygon", ("coco",), _contract(
-    "polygon-coco", "标准 COCO 多边形：segmentation 环、鞋带公式 area、bbox", _POLYGON_COCO))
+    "polygon-coco", "标准 COCO：多边形（segmentation 环）、框（segmentation []）、关键点（keypoints [x, y, 2]）",
+    _POLYGON_COCO, version=2))
 _register("depth", _NATIVE, _contract(
     "depth-maps", "index.json + 每个 item 一张 8-bit 灰度深度 PNG",
     _DEPTH_INDEX, _raster_contract(_DEPTH_INDEX, "depth_path")))
@@ -435,16 +514,26 @@ _register("reid", ("native",), _contract(
     "reid-pairs-csv", "CSV：当前 pairs 清单（PAIR_FIELDS，label 为 0/1）",
     _no_document("reid-pairs-csv"), _reid_pairs_csv))
 
-BY_ID: dict[str, ExportContract] = {contract.id: contract for contract in CONTRACTS.values()}
+# Superseded versions: no longer produced, but `exports check` still validates
+# files exported before the upgrade.
+LEGACY_CONTRACTS = (
+    _contract("polygon-json", "JSON 侧车（schema 1）：items[item_id] = {image_path, image_size, polygons, revision}",
+              _sidecar(_polygons_item)),
+    _contract("polygon-coco", "标准 COCO 多边形：segmentation 环、鞋带公式 area、bbox", _POLYGON_COCO_V1),
+)
+
+BY_ID: dict[str, ExportContract] = {
+    contract.id: contract for contract in (*CONTRACTS.values(), *LEGACY_CONTRACTS)
+}
 
 
 def contract_for(task_type: str, export_format: str) -> ExportContract | None:
     return CONTRACTS.get((task_type, export_format))
 
 
-def coco_info(name: str) -> dict:
+def coco_info(name: str, version: int = 1) -> dict:
     """The ``info`` block a COCO export carries; its version names the contract."""
-    return {"description": f"Annotation Toolkits {name} export", "version": f"{name}/v1"}
+    return {"description": f"Annotation Toolkits {name} export", "version": f"{name}/v{version}"}
 
 
 def validate_files(contract_id: str, paths: Iterable[Path]) -> ExportContract:

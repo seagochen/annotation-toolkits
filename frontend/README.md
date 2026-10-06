@@ -6,7 +6,7 @@
 [`docs/detailed_design/40_React前端.md`](../docs/detailed_design/40_React前端.md)。
 
 共享画布的坐标、图层、输入事件和快捷键契约见
-[`src/components/image-canvas/README.md`](src/components/image-canvas/README.md)。运行开发服务后
+[`src/img-annotation/common/image-canvas/README.md`](src/img-annotation/common/image-canvas/README.md)。运行开发服务后
 访问 `/canvas-demo` 可查看静态图像、多 overlay 合成、缩放、平移和工具坐标演示。
 
 ## 开发

@@ -408,7 +408,7 @@ def test_write_failure_is_reported_and_preserves_existing_decision(
     def fail_write(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr("annotation_platform.reid_task.Store.set_label", fail_write)
+    monkeypatch.setattr("annotation_platform.img_annotation.reid.reid_task.Store.set_label", fail_write)
     response = request(
         create_app(registry),
         "POST",
@@ -608,3 +608,41 @@ def test_classification_project_uses_generic_queue_and_annotation_api(tmp_path):
     unsupported = request(app, "GET", "/api/projects/scenes/actions")
     assert unsupported.status_code == 404
     assert unsupported.json()["detail"]["code"] == "actions_not_supported"
+
+
+def test_drafts_autosave_polygon_items_and_are_refused_by_other_task_types(tmp_path):
+    dataset = tmp_path / "walls"
+    dataset.mkdir()
+    (dataset / "a.jpg").write_bytes(b"image")
+    (tmp_path / "polygon.yaml").write_text("dataset: ./walls\ncategories: [crack]\n", encoding="utf-8")
+    registry = tmp_path / "projects.yaml"
+    registry.write_text(
+        "projects:\n"
+        "  - id: walls\n"
+        "    name: Walls\n"
+        "    task_type: polygon\n"
+        "    config: ./polygon.yaml\n",
+        encoding="utf-8",
+    )
+    app = create_app(registry)
+    item = request(app, "GET", "/api/projects/walls/queue").json()["items"][0]
+    draft = {
+        "image_size": {"width": 100, "height": 80},
+        "base_revision": 0,
+        "polygons": [{"category": "crack", "points": [[1, 1], [9, 1], [5, 8]]}],
+    }
+    saved = request(app, "PUT", "/api/projects/walls/drafts", json={"item_id": item["item_id"], "result": draft})
+    assert saved.status_code == 200
+    assert saved.json()["draft"] is True
+    queued = request(app, "GET", "/api/projects/walls/queue?status=pending").json()["items"][0]
+    assert (queued["source"], queued["draft"]) == ("draft", True)
+    invalid = request(
+        app, "PUT", "/api/projects/walls/drafts",
+        json={"item_id": item["item_id"], "result": {**draft, "polygons": [{"category": "x", "points": []}]}},
+    )
+    assert invalid.status_code == 422
+
+    other = create_app(make_classification_registry(tmp_path))
+    refused = request(other, "PUT", "/api/projects/scenes/drafts", json={"item_id": "x", "result": {}})
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["code"] == "drafts_not_supported"

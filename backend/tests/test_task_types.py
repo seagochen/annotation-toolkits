@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from annotation_platform.reid_task import ReIDTaskType
+from annotation_platform.img_annotation.reid.reid_task import ReIDTaskType
 from annotation_platform.task_types import (
     ActionRequest,
     DuplicateTaskTypeError,
