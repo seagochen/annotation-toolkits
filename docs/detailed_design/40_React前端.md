@@ -104,7 +104,8 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 | 图元 | 被谁用 | 关键点 |
 |---|---|---|
 | `geometry.ts` / `shortcuts.ts` | 全部三个画布任务 | 视口缩放/平移的纯函数，快捷键绑定与冲突检测 |
-| `box-tool.ts` | 检测 | 创建/选中/移动/8 向 handle 缩放/删除检测框的纯函数状态机 |
+| `box-tool.ts` | 检测 + 多边形 | 创建/选中/移动/8 向 handle 缩放/删除框的纯函数状态机；`createBoxes` 从已保存结果建框 |
+| `shape-eraser.ts` | 检测 + 多边形 | 关键点类型 `KeyPoint` 与 `hitTestKeyPoint`；矢量橡皮 `erasePoints`/`erasePolygons`/`eraseBoxes`（及组合 `eraseAt`）：圆内的关键点删除；圆内的多边形顶点删除、剩余顶点按原顺序围成多边形（不足 3 点则删除整个多边形）；圆碰到边框的框删除（在大框内部擦点不会误删框）。未变化的列表保持同一引用，便于页面跳过更新 |
 | `polygon-tool.ts` | 分割 + 多边形 | 顶点绘制/闭合/撤销，以及顶点编辑：`pointerDownEdit`（按下时依次尝试抓顶点、在选中多边形的边上插入顶点、选中多边形、取消选中）、`dragVertexTo`（限制在图内）、`insertVertex`、`deleteVertex`（至少保留 3 点）、`relabelPolygon`、`hitTest*`，全部是纯函数，分割页可直接复用 |
 | `raster-brush.ts` | 分割 + 深度 | `drawRaster`（把栅格画进图层）与 `useRasterBrush`（画笔指针状态机：按下盖章、拖动连线、抬起结束），两页共用同一份实现 |
 | `raster-buffer.ts` | 分割 + 深度 | 可原地绘制的 `Uint8ClampedArray` 像素缓冲区：`stampAt`/`strokeSegment`（画笔）、`fillPolygon`（多边形栅格化）、`toBase64`（提交）、`loadFromImageElement`/`toImageData`（读取已有 PNG、渲染预览） |
@@ -132,8 +133,11 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 | 图像列表 | 页面传 `strip` 时的最右栏：`img-annotation/common/ImageStrip.tsx`，见下 |
 
 左栏面板内的组件：`PanelSection`、`OptionList`、`Segmented`、`RangeField`；检测与多边形
-用 `AnnotationTabs` 把"类别"（带本图计数的类别图例）与"图层"（本图的框/多边形列表，
-可选中、删除）放在"标注 N"下的两个页签里。
+用 `ClassLayers` 在"标注 N"下把类别与图层合成一个列表：每个类别一行（色块、名称、本图
+数量、数字键），其下缩进列出本图该类别的形状（`LayerRow`：可选中、删除；选中的形状行下
+出现"类别"下拉框，用来改类别）。点击类别行 = 设为新形状的当前类别（左侧竖条）并高亮该
+类别（按下态）：画布显示该类所有多边形的顶点、框的四角，其他类别淡化；再点一次取消高亮，
+`Esc` 也会取消。
 
 **图像列表**（`ImageStrip`，ReID 之外的任务页都有）：不带 `status` 分页读取全部条目
 （每页 200，"加载更多"续读），每项一张缩略图（文本条目为文档图标）、文件名，已完成的
@@ -169,9 +173,9 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 | 全部画布页 | `H` 拖动画布工具、`Ctrl/⌘ + Z` 撤销、`Ctrl/⌘ + Shift + Z` 或 `Ctrl/⌘ + Y` 重做 |
 | 分类 | `1`–`9` 选择/切换第 N 个标签 |
 | 文本片段 | 拖选文本新建片段（当前标签）、`1`–`9` 选择标签（选中片段时改为该标签）、`Del`/`Backspace` 删除选中片段、`Esc` 取消选中 |
-| 检测 | `1`–`9` 选择类别（选中框时改为该类别）、`V` 选择、`B` 绘制新框、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中 |
+| 检测 | `1`–`9` 选择并高亮类别（选中框时改为该类别）、`V` 选择、`B` 绘制新框、`E` 橡皮、`[`/`]` 橡皮半径、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中/高亮 |
 | 分割 | `1`–`9` 选择类别、`B` 画笔、`E` 橡皮、`P` 多边形、`[`/`]` 画笔半径、`Enter` 闭合多边形、`Backspace` 撤销最后一点、`Esc` 放弃多边形 |
-| 多边形 | `1`–`9` 选择类别（选中多边形时改为该类别）、`V` 选择、`P` 绘制新多边形/回到编辑、`Enter` 闭合、`Backspace` 绘制时撤销一点（编辑时同 Del）、`Del` 删除选中顶点（未选顶点时删除多边形）、`Esc` 放弃绘制/取消选中；拖动顶点移动，点击选中多边形的边插入顶点 |
+| 多边形 | `1`–`9` 选择类别并显示其顶点（选中形状时改为该类别）、`V` 选择、`P` 绘制新多边形/回到编辑、`B` 画矩形框、`K` 放置关键点、`E` 橡皮、`[`/`]` 橡皮半径、`Enter` 闭合、`Backspace` 绘制时撤销一点（编辑时同 Del）、`Del` 删除选中的关键点/框/顶点（未选顶点时删除多边形）、`Esc` 放弃绘制/取消选中与高亮；拖动顶点、框、关键点移动，点击选中多边形的边插入顶点 |
 | 深度 | `1` 提高、`2` 降低、`X` 切换方向、`[`/`]` 画笔半径 |
 | ReID | `1` 同一人、`2` 不同人、`3` 不确定（按下即提交） |
 
@@ -191,8 +195,18 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 
 ## 8. 多边形标注（`img-annotation/standard/polygon/`）
 
-`PolygonReviewPage` 以队列条目的 `polygons`（已提交结果或预标）初始化
-`polygon-tool.ts` 的状态，按条目的 `item_id` + `revision` + `source` 判断是否需要
+同一张图可以混合多边形、矩形框、关键点三种形状（后端契约见 `70_外部接口.md`
+polygon 小节，`polygon-json/v2` / `polygon-coco/v2`）。工具栏：选择、拖动画布 | 多边形、
+矩形框、关键点 | 橡皮。框与关键点用当前类别创建，画完仍停留在该工具以便连续标注；
+选择模式下按下时依次尝试：关键点 → 选中框的缩放 handle → 多边形顶点/选中多边形的边
+→ 框（框画在多边形之上）→ 多边形，三种形状同一时刻只选中一个，选类别会改选中形状
+的类别。橡皮半径按屏幕像素计（缩放画布不改变手感），按住拖动连续擦除，规则见
+`shape-eraser.ts`；擦除用函数式 state 更新，避免两次渲染之间的多个 pointer 事件基于
+旧状态互相覆盖。撤销/重做的快照是三个列表的组合（`useRecordChanges` 传入按列表引用
+比较的 `equals`），一次拖动或一次橡皮笔画为一步。
+
+`PolygonReviewPage` 以队列条目的 `polygons`/`boxes`/`points`（已提交结果或预标）初始化
+`polygon-tool.ts`、`box-tool.ts` 与关键点的状态，按条目的 `item_id` + `revision` + `source` 判断是否需要
 重新初始化。提交带上条目的 `revision` 作为 `base_revision`，409 时提示并提供
 "重新载入"。`useTaskQueue` 的 `browse({ status, offset })` 让页面在"待标注"与
 "已提交"之间切换，并从图像列表打开任意一张（`status=annotated&offset=N&limit=1`），于是已提交的

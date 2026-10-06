@@ -57,6 +57,20 @@ export const LowerIcon = () => (
   </Icon>
 );
 
+export const KeyPointIcon = () => (
+  <Icon>
+    <circle cx="10" cy="10" r="2.5" />
+    <path d="M10 2.5v3M10 14.5v3M2.5 10h3M14.5 10h3" />
+  </Icon>
+);
+
+export const ShapeEraserIcon = () => (
+  <Icon>
+    <circle cx="10" cy="10" r="6.5" strokeDasharray="2.5 2" />
+    <path d="M7.5 7.5l5 5M12.5 7.5l-5 5" />
+  </Icon>
+);
+
 export const UndoIcon = () => (
   <Icon>
     <path d="M7 5 3.5 8.5 7 12" />

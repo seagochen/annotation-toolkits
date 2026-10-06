@@ -8,6 +8,7 @@ from annotation_platform.img_annotation.standard.polygon_task import (
     bounding_box,
     shoelace_area,
 )
+from annotation_platform.export_contracts import validate_files
 from annotation_platform.task_types import (
     ExportRequest,
     QueueRequest,
@@ -78,12 +79,21 @@ def items(module, project, **filters) -> dict:
     return {item["image_path"]: item for item in page.items}
 
 
-def result(polygons, base_revision=0, width=100, height=80):
-    return {
+def result(polygons, base_revision=0, width=100, height=80, boxes=None, points=None):
+    submitted = {
         "image_size": {"width": width, "height": height},
         "polygons": polygons,
         "base_revision": base_revision,
     }
+    if boxes is not None:
+        submitted["boxes"] = boxes
+    if points is not None:
+        submitted["points"] = points
+    return submitted
+
+
+BOX = {"category": "crack", "x": 5.0, "y": 6.0, "width": 20.0, "height": 10.0}
+POINT = {"category": "material", "x": 30.0, "y": 40.0}
 
 
 def test_geometry_helpers():
@@ -100,7 +110,8 @@ def test_without_prelabels_every_image_starts_blank(tmp_path):
     assert sorted(queued) == sorted(IMAGES)
     assert queued["a.jpg"] == {
         "item_id": queued["a.jpg"]["item_id"], "image_path": "a.jpg", "revision": 0,
-        "source": "none", "image_size": None, "polygons": [], "annotated": False,
+        "source": "none", "image_size": None, "polygons": [], "boxes": [], "points": [],
+        "annotated": False,
     }
     status = module.status(project)
     assert status.state == "reviewing"
@@ -210,6 +221,14 @@ def test_duplicate_image_entries_are_not_loaded(tmp_path):
         (lambda r: r.update(polygons=[{"category": "unknown", "points": SQUARE}]), "unknown polygon category"),
         (lambda r: r.update(polygons=[{"category": "material", "points": SQUARE, "id": 1}]), "exactly category and points"),
         (lambda r: r.update(polygons=None), "`polygons` list"),
+        (lambda r: r.update(boxes={}), "`boxes` must be a list"),
+        (lambda r: r.update(boxes=[{**BOX, "width": 0}]), "positive size"),
+        (lambda r: r.update(boxes=[{**BOX, "x": 90.0}]), "box 0 is out of image bounds"),
+        (lambda r: r.update(boxes=[{**BOX, "category": "unknown"}]), "unknown polygon box category"),
+        (lambda r: r.update(boxes=[{**BOX, "id": 1}]), "exactly category, x, y, width and height"),
+        (lambda r: r.update(points=[{**POINT, "x": 100.5}]), "point 0 is out of image bounds"),
+        (lambda r: r.update(points=[{**POINT, "y": float("nan")}]), "finite"),
+        (lambda r: r.update(points=[{"category": "material", "x": 1.0}]), "exactly category, x and y"),
         (lambda r: r.pop("base_revision"), "base_revision"),
         (lambda r: r.update(base_revision=-1), "base_revision"),
         (lambda r: r.update(base_revision=True), "base_revision"),
@@ -326,7 +345,10 @@ def test_coco_export_is_standard_and_passes_image_metadata_through(tmp_path):
     assert exported.metadata == {"images": 3, "annotations": 3}
     document = json.loads(exported.artifacts[0].read_text(encoding="utf-8"))
     validate_coco(document)
-    assert document["categories"] == [{"id": 1, "name": "material"}, {"id": 2, "name": "crack"}]
+    assert document["categories"] == [
+        {"id": 1, "name": "material", "keypoints": ["point"], "skeleton": []},
+        {"id": 2, "name": "crack", "keypoints": ["point"], "skeleton": []},
+    ]
     assert document["images"] == [
         {"capture": "cam-1", "id": 1, "file_name": "a.jpg", "width": 100, "height": 80},
         # c.jpg's prelabels were not loaded, but its image metadata is still the user's.
@@ -349,12 +371,87 @@ def test_coco_export_is_standard_and_passes_image_metadata_through(tmp_path):
         module.export(project, ExportRequest(format="voc"))
 
 
+def test_boxes_and_points_are_saved_viewed_and_exported(tmp_path):
+    module = PolygonTaskType()
+    project = module.load(project_config(tmp_path))
+    item_id = items(module, project)["b.jpg"]["item_id"]
+    submitted = result([{"category": "material", "points": SQUARE}], boxes=[BOX], points=[POINT])
+    saved = module.submit(project, Submission(item_id, submitted)).item
+    assert saved["revision"] == 1
+    item = items(module, project)["b.jpg"]
+    assert (item["polygons"], item["boxes"], item["points"]) == (
+        [{"category": "material", "points": SQUARE}], [BOX], [POINT])
+    # The same shapes again are idempotent; a changed point is a new revision.
+    assert module.submit(project, Submission(item_id, {**submitted, "base_revision": 0})).item["revision"] == 1
+    moved = result([{"category": "material", "points": SQUARE}], base_revision=1,
+                   boxes=[BOX], points=[{**POINT, "x": 31.0}])
+    assert module.submit(project, Submission(item_id, moved)).item["revision"] == 2
+
+    coco_file = module.export(project, ExportRequest(format="coco")).artifacts[0]
+    validate_files("polygon-coco/v2", [coco_file])
+    polygon, box, point = json.loads(coco_file.read_text(encoding="utf-8"))["annotations"]
+    assert polygon["segmentation"] and "keypoints" not in polygon
+    assert box == {"id": 2, "image_id": 1, "category_id": 2, "segmentation": [],
+                   "area": 200.0, "bbox": [5.0, 6.0, 20.0, 10.0], "iscrowd": 0}
+    assert point == {"id": 3, "image_id": 1, "category_id": 1, "segmentation": [], "area": 0.0,
+                     "bbox": [31.0, 40.0, 0.0, 0.0], "keypoints": [31.0, 40.0, 2],
+                     "num_keypoints": 1, "iscrowd": 0}
+    native = module.export(project, ExportRequest(format="native")).artifacts
+    validate_files("polygon-json/v2", native)
+
+
+def test_schema_1_sidecars_are_read_and_upgraded_when_written(tmp_path):
+    module = PolygonTaskType()
+    project = module.load(project_config(tmp_path))
+    queued = items(module, project)
+    sidecar = tmp_path / "images" / ".annotations" / "polygon.json"
+    sidecar.parent.mkdir()
+    old_item = {"image_path": "a.jpg", "image_size": {"width": 100, "height": 80}, "revision": 1,
+                "polygons": [{"category": "material", "points": SQUARE}]}
+    sidecar.write_text(json.dumps({"schema": 1, "items": {queued["a.jpg"]["item_id"]: old_item},
+                                   "history": []}), encoding="utf-8")
+    validate_files("polygon-json/v1", [sidecar])
+    item = items(module, project)["a.jpg"]
+    assert (item["source"], item["boxes"], item["points"]) == ("annotation", [], [])
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["schema"] == 1  # reading never writes
+
+    # Exporting rewrites it as the current contract, every item with all three lists.
+    module.export(project, ExportRequest(format="native"))
+    upgraded = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert upgraded["schema"] == 2
+    assert upgraded["items"][queued["a.jpg"]["item_id"]] == {**old_item, "boxes": [], "points": []}
+    validate_files("polygon-json/v2", [sidecar])
+    # Re-saving the unchanged shapes is still idempotent after the upgrade.
+    same = result([{"category": "material", "points": SQUARE}], base_revision=1, boxes=[], points=[])
+    assert module.submit(project, Submission(queued["a.jpg"]["item_id"], same)).item["revision"] == 1
+
+
+@pytest.mark.parametrize(
+    ("annotation", "reason"),
+    [
+        ({"keypoints": [1, 2, 2, 3, 4, 2]}, "single-point keypoint"),
+        ({"keypoints": [1, 2, 0]}, "visibility 1 or 2"),
+        ({"keypoints": [101, 2, 2]}, "keypoint is outside"),
+        ({"segmentation": [], "bbox": [0, 0, 0, 5]}, "positive size"),
+        ({"segmentation": [], "bbox": [90, 0, 20, 5]}, "bbox is outside"),
+        ({"segmentation": []}, "needs a bbox"),
+    ],
+)
+def test_invalid_box_and_keypoint_prelabels_leave_the_image_blank(tmp_path, annotation, reason):
+    document = coco(annotations=[{"id": 1, "image_id": 2, "category_id": 7, **annotation}])
+    module = PolygonTaskType()
+    project = module.load(project_config(tmp_path, document))
+    assert items(module, project)["b.jpg"]["source"] == "none"
+    reasons = [issue["reason"] for issue in module.status(project).details["prelabel_issues"]]
+    assert any(reason in text for text in reasons), reasons
+
+
 def test_coco_export_round_trips_as_prelabels(tmp_path):
     module = PolygonTaskType()
     project = module.load(project_config(tmp_path))
     queued = items(module, project)
     module.submit(project, Submission(queued["nested/e.png"]["item_id"], result(
-        [{"category": "material", "points": SQUARE}])))
+        [{"category": "material", "points": SQUARE}], boxes=[BOX], points=[POINT])))
     exported = module.export(project, ExportRequest(format="coco")).artifacts[0]
 
     second = tmp_path / "second"
@@ -369,6 +466,7 @@ def test_coco_export_round_trips_as_prelabels(tmp_path):
     item = items(module, project)["nested/e.png"]
     assert item["source"] == "prelabel"
     assert item["polygons"] == [{"category": "material", "points": SQUARE}]
+    assert (item["boxes"], item["points"]) == ([BOX], [POINT])
     assert module.status(project).details["prelabel_issue_count"] == 0
 
 

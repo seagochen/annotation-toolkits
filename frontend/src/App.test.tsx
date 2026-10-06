@@ -736,7 +736,7 @@ describe("project pages", () => {
       );
 
     renderAt("/projects/yard/detect");
-    expect(await screen.findByRole("radio", { name: "cat" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "cat" })).toBeVisible();
     expect(screen.getByRole("application", { name: "yard.jpg" })).toBeVisible();
     const save = screen.getByRole("button", { name: "保存并继续" });
     await waitFor(() => expect(save).toBeEnabled());
@@ -864,6 +864,8 @@ describe("project pages", () => {
         { category: "material", points: [[10, 10], [50, 10], [50, 50], [10, 50]] },
         { category: "crack", points: [[60, 10], [90, 10], [75, 40]] },
       ],
+      boxes: [{ category: "crack", x: 5, y: 60, width: 20, height: 10 }],
+      points: [{ category: "material", x: 70.004, y: 30 }],
     };
     fetchMock
       .mockResolvedValueOnce(
@@ -885,20 +887,36 @@ describe("project pages", () => {
           total: 1,
           offset: 0,
           limit: 1,
-          items: [{ ...prelabelItem, revision: 2, source: "annotation", polygons: [] }],
+          items: [{ ...prelabelItem, revision: 2, source: "annotation", polygons: [], boxes: [], points: [] }],
         }),
       );
 
     renderAt("/projects/walls/polygon");
     expect(await screen.findByText("初始内容：COCO 预标。")).toBeVisible();
-    // The shapes are listed under the "图层" tab of the annotation panel.
-    fireEvent.click(screen.getByRole("button", { name: "图层" }));
-    expect(screen.getByRole("button", { name: /#1 material/ })).toBeVisible();
+    // Each category of the annotation panel lists this image's shapes of that category.
+    const classes = screen.getByRole("group", { name: "标注类别" });
+    const material = within(classes).getByRole("button", { name: "material" });
+    const groupOf = (button: HTMLElement) => button.closest(".class-group") as HTMLElement;
+    expect(within(groupOf(material)).getByRole("button", { name: /^多边形 #1/ })).toBeVisible();
+    expect(within(groupOf(material)).getByRole("button", { name: /^点 #1/ })).toBeVisible();
+    // Pressing a category shows its vertices; pressing it again hides them.
+    fireEvent.click(material);
+    expect(material).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(material);
+    expect(material).toHaveAttribute("aria-pressed", "false");
     // Select the first polygon from the list, relabel it with the digit key, delete the second.
-    fireEvent.click(screen.getByRole("button", { name: /#1 material/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^多边形 #1/ }));
     fireEvent.keyDown(window, { key: "2" });
-    expect(screen.getByRole("button", { name: /#1 crack/ })).toBeVisible();
+    const crack = within(classes).getByRole("button", { name: "crack" });
+    expect(within(groupOf(crack)).getByRole("button", { name: /^多边形 #1/ })).toBeVisible();
+    // The selected shape can be relabelled from its row as well.
+    fireEvent.change(screen.getByRole("combobox", { name: "类别" }), { target: { value: "material" } });
+    expect(within(groupOf(material)).getByRole("button", { name: /^多边形 #1/ })).toBeVisible();
+    fireEvent.change(screen.getByRole("combobox", { name: "类别" }), { target: { value: "crack" } });
     fireEvent.click(screen.getByRole("button", { name: "删除多边形 #2" }));
+    // Boxes and keypoints from the prelabel are listed too.
+    fireEvent.click(screen.getByRole("button", { name: "删除框 #1" }));
+    expect(screen.queryByRole("button", { name: /^框 #1/ })).toBeNull();
     const save = screen.getByRole("button", { name: "保存并继续" });
     await waitFor(() => expect(save).toBeEnabled());
     fireEvent.click(save);
@@ -911,6 +929,8 @@ describe("project pages", () => {
         image_size: { width: 100, height: 80 },
         base_revision: 0,
         polygons: [{ category: "crack", points: [[10, 10], [50, 10], [50, 50], [10, 50]] }],
+        boxes: [],
+        points: [{ category: "material", x: 70, y: 30 }],
       },
     });
 
@@ -920,7 +940,7 @@ describe("project pages", () => {
     const browse = new URL((fetchMock.mock.calls[3][0] as Request).url);
     expect(browse.searchParams.get("status")).toBe("annotated");
     expect(browse.searchParams.get("offset")).toBe("0");
-    expect(screen.getByText("还没有多边形。该图没有目标时可直接保存。")).toBeVisible();
+    expect(screen.getByText("还没有标注。该图没有目标时可直接保存。")).toBeVisible();
     getContext.mockRestore();
   });
 

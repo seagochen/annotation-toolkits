@@ -4,14 +4,15 @@ import { useParams } from "wouter";
 import { projectFileUrl } from "../../../api/client";
 import { LoadingState } from "../../../components/AsyncState";
 import {
-  AnnotationTabs,
   CANVAS_HINTS,
-  OptionList,
+  ClassLayers,
+  RangeField,
   SubmitBar,
   TaskWorkspace,
+  type LayerRow,
 } from "../../common/workspace/TaskWorkspace";
 import { categoryColor } from "../../common/workspace/palette";
-import { BoxIcon, HandIcon, SelectIcon } from "../../common/workspace/tool-icons";
+import { BoxIcon, HandIcon, SelectIcon, ShapeEraserIcon } from "../../common/workspace/tool-icons";
 import { useEditHistory, useRecordChanges } from "../../common/workspace/useEditHistory";
 import {
   DIGIT_KEYS,
@@ -45,15 +46,23 @@ import {
   type Box,
   type BoxToolState,
 } from "../../common/image-canvas/box-tool";
+import { eraseBoxes } from "../../common/image-canvas/shape-eraser";
 
 const HANDLE_SCREEN_SIZE = 8;
 const MIN_BOX_SCREEN_SIZE = 3;
+const MIN_ERASER = 4;
+const MAX_ERASER = 80;
 
 export function DetectionReviewPage() {
   const { projectId = "" } = useParams();
   const [tool, setTool] = useState<BoxToolState>(createBoxToolState());
-  const [mode, setMode] = useState<"select" | "pan" | "draw">("select");
+  const [mode, setMode] = useState<"select" | "pan" | "draw" | "erase">("select");
+  const [eraserRadius, setEraserRadius] = useState(16);
+  const [erasing, setErasing] = useState(false);
+  const erasingRef = useRef(false);
   const [category, setCurrentCategory] = useState("");
+  // The category picked in the panel: its boxes show their corners, the rest are dimmed.
+  const [focused, setFocused] = useState<string | null>(null);
   const [previewPoint, setPreviewPoint] = useState<Point | null>(null);
   const viewportRef = useRef<Viewport>({ scale: 1, offset: { x: 0, y: 0 } });
 
@@ -72,7 +81,8 @@ export function DetectionReviewPage() {
     if (mode === "draw") setMode("select");
   });
   const history = useEditHistory<readonly Box[]>();
-  const markApplied = useRecordChanges(history, tool.drag ? null : tool.boxes, itemId);
+  // A drag or an eraser stroke is one undo step.
+  const markApplied = useRecordChanges(history, tool.drag || erasing ? null : tool.boxes, itemId);
   const imagePath = item ? itemText(item, "image_path") : undefined;
   const imageUrl = imagePath ? projectFileUrl(projectId, imagePath) : undefined;
   const imageSize = useImageSize(imageUrl);
@@ -91,6 +101,7 @@ export function DetectionReviewPage() {
         for (const box of tool.boxes) {
           const selected = box.id === tool.selectedId;
           const color = categoryColor(categories.indexOf(box.category));
+          context.globalAlpha = focused !== null && box.category !== focused && !selected ? 0.35 : 1;
           context.lineWidth = (selected ? 3 : 2) / scale;
           context.strokeStyle = color;
           if (selected) {
@@ -106,24 +117,40 @@ export function DetectionReviewPage() {
           context.fillRect(box.x, tagY, tagWidth, tagHeight);
           context.fillStyle = "#ffffff";
           context.fillText(box.category, box.x + 4 / scale, tagY + fontSize + 1 / scale);
-          if (selected) {
-            const handleSize = HANDLE_SCREEN_SIZE / scale;
+          // The selected box shows all eight handles, the focused category's boxes their corners.
+          if (selected || box.category === focused) {
+            const handleSize = (selected ? HANDLE_SCREEN_SIZE : HANDLE_SCREEN_SIZE * 0.75) / scale;
             context.lineWidth = 1.5 / scale;
-            for (const [hx, hy] of [
+            const corners = [
               [box.x, box.y],
-              [box.x + box.width / 2, box.y],
               [box.x + box.width, box.y],
-              [box.x + box.width, box.y + box.height / 2],
               [box.x + box.width, box.y + box.height],
-              [box.x + box.width / 2, box.y + box.height],
               [box.x, box.y + box.height],
+            ];
+            const midpoints = [
+              [box.x + box.width / 2, box.y],
+              [box.x + box.width, box.y + box.height / 2],
+              [box.x + box.width / 2, box.y + box.height],
               [box.x, box.y + box.height / 2],
-            ]) {
+            ];
+            for (const [hx, hy] of selected ? [...corners, ...midpoints] : corners) {
               context.fillStyle = "#ffffff";
               context.fillRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
               context.strokeRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
             }
           }
+        }
+        context.globalAlpha = 1;
+        if (mode === "erase" && previewPoint) {
+          context.beginPath();
+          context.arc(previewPoint.x, previewPoint.y, eraserRadius / scale, 0, Math.PI * 2);
+          context.fillStyle = "rgba(255, 255, 255, 0.18)";
+          context.fill();
+          context.setLineDash([4 / scale, 3 / scale]);
+          context.lineWidth = 1.5 / scale;
+          context.strokeStyle = "#ffffff";
+          context.stroke();
+          context.setLineDash([]);
         }
         if (mode === "draw" && previewPoint) {
           const preview = previewCreateRect(tool, previewPoint);
@@ -137,13 +164,36 @@ export function DetectionReviewPage() {
         }
       },
     }),
-    [categories, category, mode, previewPoint, tool],
+    [categories, category, eraserRadius, focused, mode, previewPoint, tool],
   );
 
   function handlePointer(event: ImageCanvasPointerEvent) {
     if (!imageSize) return;
     const bounds = imageSize;
     const handleSize = HANDLE_SCREEN_SIZE / viewportRef.current.scale;
+    if (mode === "erase") {
+      // A box is erased when the eraser circle touches its outline.
+      const radius = eraserRadius / viewportRef.current.scale;
+      const erase = () =>
+        setTool((current) => {
+          const boxes = eraseBoxes(current.boxes, event.image, radius);
+          if (boxes === current.boxes) return current;
+          const keep = boxes.some((box) => box.id === current.selectedId);
+          return { ...current, boxes, selectedId: keep ? current.selectedId : null };
+        });
+      setPreviewPoint(event.image);
+      if (event.phase === "down") {
+        erasingRef.current = true;
+        setErasing(true);
+        erase();
+      } else if (event.phase === "move" && erasingRef.current) {
+        erase();
+      } else if (event.phase === "up" || event.phase === "cancel") {
+        erasingRef.current = false;
+        setErasing(false);
+      }
+      return;
+    }
     if (mode === "draw") {
       if (event.phase === "down") {
         setTool((current) => beginCreate(current, event.image, category));
@@ -190,12 +240,19 @@ export function DetectionReviewPage() {
   const undo = () => restore(history.undo);
   const redo = () => restore(history.redo);
 
-  function chooseCategory(next: string) {
+  /** Relabel the selected box; new boxes get the category too. */
+  function relabel(next: string) {
     setCurrentCategory(next);
-    // With a box selected, picking a category relabels that box.
     setTool((current) =>
       current.selectedId ? setCategory(current, current.selectedId, next) : current,
     );
+  }
+
+  /** A category row: new boxes get it and its boxes are highlighted; again to clear. */
+  function pickCategory(next: string) {
+    setCurrentCategory(next);
+    setFocused((current) => (current === next ? null : next));
+    setTool((current) => ({ ...current, selectedId: null }));
   }
 
   function toggleDraw() {
@@ -203,7 +260,7 @@ export function DetectionReviewPage() {
     setTool((current) => ({ ...current, selectedId: null }));
   }
 
-  function chooseMode(next: "select" | "pan" | "draw") {
+  function chooseMode(next: "select" | "pan" | "draw" | "erase") {
     setPreviewPoint(null);
     setMode(next);
     if (next === "draw") setTool((current) => ({ ...current, selectedId: null }));
@@ -217,14 +274,35 @@ export function DetectionReviewPage() {
     {
       keys: DIGIT_KEYS,
       display: "1–9",
-      description: "选择类别（选中框时改为该类别）",
+      description: "选择类别并高亮（选中框时改为该类别）",
       run: (key) => {
         const next = categories[Number(key) - 1];
-        if (next) chooseCategory(next);
+        if (!next) return;
+        if (tool.selectedId) {
+          relabel(next);
+        } else {
+          setCurrentCategory(next);
+          setFocused(next);
+        }
       },
     },
     { keys: ["v"], display: "V", description: "选择 / 编辑框", run: () => chooseMode("select") },
     { keys: ["h"], display: "H", description: "拖动画布", run: () => chooseMode("pan") },
+    { keys: ["e"], display: "E", description: "橡皮（擦除碰到的框）", run: () => chooseMode("erase") },
+    {
+      keys: ["["],
+      display: "[",
+      description: "缩小橡皮",
+      repeat: true,
+      run: () => setEraserRadius((current) => Math.max(MIN_ERASER, current - 2)),
+    },
+    {
+      keys: ["]"],
+      display: "]",
+      description: "放大橡皮",
+      repeat: true,
+      run: () => setEraserRadius((current) => Math.min(MAX_ERASER, current + 2)),
+    },
     {
       keys: ["b"],
       display: "B",
@@ -240,9 +318,10 @@ export function DetectionReviewPage() {
     {
       keys: ["escape"],
       display: "Esc",
-      description: "取消绘制 / 取消选中",
+      description: "取消绘制 / 取消选中与类别高亮",
       run: () => {
         setPreviewPoint(null);
+        setFocused(null);
         setMode("select");
         setTool((current) => ({ ...current, selectedId: null, drag: null }));
       },
@@ -270,9 +349,18 @@ export function DetectionReviewPage() {
     );
   }
 
-  const counts: Record<string, number> = {};
-  for (const box of tool.boxes) counts[box.category] = (counts[box.category] ?? 0) + 1;
-  const selectedBox = tool.boxes.find((box) => box.id === tool.selectedId);
+  const layerRows: LayerRow[] = tool.boxes.map((box, index) => ({
+    key: box.id,
+    category: box.category,
+    label: `框 #${index + 1}`,
+    meta: `${Math.round(box.width)}×${Math.round(box.height)}`,
+    active: box.id === tool.selectedId,
+    onSelect: () => {
+      setMode("select");
+      setTool((current) => ({ ...current, selectedId: box.id }));
+    },
+    onDelete: () => setTool((current) => deleteBox(current, box.id)),
+  }));
 
   return (
     <TaskWorkspace
@@ -290,70 +378,24 @@ export function DetectionReviewPage() {
       history={{ canUndo: history.canUndo, canRedo: history.canRedo, undo, redo }}
       panel={
         <>
-          <AnnotationTabs
-            classes={
-              <>
-                <OptionList
-                  counts={counts}
-                  label="检测类别"
-                  name="detection-category"
-                  onToggle={chooseCategory}
-                  options={categories}
-                  selected={selectedBox ? [selectedBox.category] : [category]}
-                  swatches
-                />
-                {selectedBox && <p className="panel-note">已选中一个框：选择类别会修改它的类别。</p>}
-              </>
-            }
-            count={tool.boxes.length}
-            layers={
-              tool.boxes.length === 0 ? (
-                <p className="empty-note">还没有框。没有目标时可直接保存。</p>
-              ) : (
-                <ul className="item-list">
-                  {tool.boxes.map((box, index) => (
-                    <li key={box.id}>
-                      <button
-                        aria-pressed={box.id === tool.selectedId}
-                        className="item-select"
-                        onClick={() => {
-                          setMode("select");
-                          setTool((current) => ({ ...current, selectedId: box.id }));
-                        }}
-                        type="button"
-                      >
-                        <span
-                          aria-hidden="true"
-                          className="option-swatch"
-                          style={{ background: categoryColor(categories.indexOf(box.category)) }}
-                        />
-                        <span>
-                          #{index + 1} {box.category}
-                        </span>
-                        <span className="item-meta">
-                          {Math.round(box.width)}×{Math.round(box.height)}
-                        </span>
-                      </button>
-                      <button
-                        aria-label={`删除框 #${index + 1}`}
-                        className="icon-button"
-                        onClick={() => setTool((current) => deleteBox(current, box.id))}
-                        type="button"
-                      >
-                        ×
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )
-            }
+          <ClassLayers
+            categories={categories}
+            current={category}
+            emptyNote="还没有框。没有目标时可直接保存。"
+            focused={focused}
+            label="检测类别"
+            onPick={pickCategory}
+            onRelabel={relabel}
+            rows={layerRows}
           />
           <p className="panel-note">
             {mode === "draw"
               ? `在图像上拖动，绘制一个「${category}」框。`
               : mode === "pan"
                 ? "拖动平移画布；按 V 回到选择。"
-                : "点击框选中，拖动移动，拖动控制点调整大小。"}
+                : mode === "erase"
+                  ? "按住拖动擦除：橡皮碰到边框的框被删除。"
+                  : "点击框选中，拖动移动，拖动控制点调整大小；点击左侧类别高亮该类的框。"}
           </p>
         </>
       }
@@ -381,12 +423,25 @@ export function DetectionReviewPage() {
       }
       strip={<ImageStrip dirty={history.canUndo} projectId={projectId} queue={queue} />}
       title="目标检测"
+      toolOptions={
+        mode === "erase" ? (
+          <RangeField
+            label="橡皮半径"
+            max={MAX_ERASER}
+            min={MIN_ERASER}
+            onChange={setEraserRadius}
+            unit="px"
+            value={eraserRadius}
+          />
+        ) : undefined
+      }
       tools={[
         [
           { id: "select", label: "选择", icon: <SelectIcon />, shortcut: "V", active: mode === "select", onSelect: () => chooseMode("select") },
           { id: "pan", label: "拖动画布", icon: <HandIcon />, shortcut: "H", active: mode === "pan", onSelect: () => chooseMode("pan") },
         ],
         [{ id: "box", label: "矩形框", icon: <BoxIcon />, shortcut: "B", active: mode === "draw", onSelect: () => chooseMode("draw") }],
+        [{ id: "erase", label: "橡皮", icon: <ShapeEraserIcon />, shortcut: "E", active: mode === "erase", onSelect: () => chooseMode("erase") }],
       ]}
     />
   );

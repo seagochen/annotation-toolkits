@@ -160,6 +160,17 @@ def polygon_coco(**annotation):
     return coco("polygon-coco/v1", annotations=[base])
 
 
+def shapes_coco(categories=({"id": 1, "name": "car", "keypoints": ["point"], "skeleton": []},), **annotation):
+    """polygon-coco/v2 with one box (or, with ``keypoints``, one keypoint)."""
+    base = {"id": 1, "image_id": 1, "category_id": 1, "segmentation": [],
+            "area": 2.0, "bbox": [0.0, 0.0, 2.0, 1.0], "iscrowd": 0}
+    base.update(annotation)
+    return coco("polygon-coco/v2", annotations=[base], categories=list(categories))
+
+
+POINT_ANNOTATION = {"keypoints": [1.0, 2.0, 2], "num_keypoints": 1, "bbox": [1.0, 2.0, 0, 0], "area": 0}
+
+
 @pytest.mark.parametrize(
     ("contract", "content", "message"),
     [
@@ -173,6 +184,18 @@ def polygon_coco(**annotation):
         ("polygon-coco/v1", polygon_coco(segmentation=[[0, 0, 4, 0]]), "at least 3 points"),
         ("polygon-coco/v1", polygon_coco(segmentation=[[0, 0, 5, 0, 4, 3]], bbox=[0, 0, 5, 3], area=7.5), "inside the image"),
         ("polygon-coco/v1", polygon_coco(iscrowd=1), "iscrowd"),
+        ("polygon-coco/v2", shapes_coco(area=3.0), "width\\*height"),
+        ("polygon-coco/v2", shapes_coco(bbox=[3.0, 0.0, 2.0, 1.0]), "box must lie inside"),
+        ("polygon-coco/v2", shapes_coco(**{**POINT_ANNOTATION, "bbox": [1.0, 2.0, 1, 1]}), "\\[x, y, 0, 0\\]"),
+        ("polygon-coco/v2", shapes_coco(**{**POINT_ANNOTATION, "keypoints": [1.0, 2.0, 1]}), "\\[x, y, 2\\]"),
+        ("polygon-coco/v2", shapes_coco(({"id": 1, "name": "car"},), **POINT_ANNOTATION), "declare keypoints"),
+        ("polygon-coco/v2", shapes_coco(segmentation=None), "segmentation \\[\\]"),
+        ("polygon-json/v2", {"schema": 2, "history": [], "items": {"i": {
+            "image_path": "a.jpg", "image_size": SIZE, "revision": 1, "polygons": [], "boxes": []}}}, "points"),
+        ("polygon-json/v2", {"schema": 2, "history": [], "items": {"i": {
+            "image_path": "a.jpg", "image_size": SIZE, "revision": 1, "polygons": [], "points": [],
+            "boxes": [{"category": "a", "x": 0, "y": 0, "width": 9999, "height": 1}]}}}, "inside the image"),
+        ("polygon-json/v2", {"schema": 1, "history": [], "items": {}}, "must be 2"),
         ("text-span-json/v1", {"schema": 1, "history": [], "items": {"i": {
             "image_path": "a.txt", "length": 2, "spans": [{"start": 1, "end": 3, "label": "A"}]}}}, "start < end <= length"),
         ("polygon-json/v1", {"schema": 1, "history": [], "items": {"i": {
@@ -253,9 +276,9 @@ def test_cli_reports_contract_violations_and_errors(tmp_path, capsys):
     workspace = str(tmp_path / "ws")
     archive = tmp_path / "polygon.json"
     assert exports_main(["export", "--workspace", workspace, "polygon", "--output", str(archive)]) == 0
-    assert capsys.readouterr().out.startswith("polygon-json/v1\t")
-    assert exports_main(["check", "polygon-json/v1", str(archive)]) == 0
-    assert exports_main(["check", "polygon-coco/v1", str(archive)]) == 1
+    assert capsys.readouterr().out.startswith("polygon-json/v2\t")
+    assert exports_main(["check", "polygon-json/v2", str(archive)]) == 0
+    assert exports_main(["check", "polygon-coco/v2", str(archive)]) == 1
     assert "invalid:" in capsys.readouterr().err
     assert exports_main(["export", "--workspace", workspace, "missing", "--output", str(archive)]) == 2
     assert exports_main(["export", "--workspace", workspace, "polygon", "--format", "voc",
