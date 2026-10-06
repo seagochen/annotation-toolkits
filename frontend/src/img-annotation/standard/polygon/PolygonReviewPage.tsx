@@ -121,6 +121,12 @@ function storedList<T>(item: QueueItem, key: string): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
+/** An item and each new revision of it start from what the server sent. */
+function polygonItemKey(item: QueueItem): string {
+  const revision = typeof item.revision === "number" ? item.revision : 0;
+  return `${itemText(item, "item_id")}:${revision}:${itemText(item, "source")}`;
+}
+
 function storedSize(item: QueueItem): { width: number; height: number } | null {
   const size = item.image_size as { width?: unknown; height?: unknown } | null | undefined;
   return size && typeof size.width === "number" && typeof size.height === "number"
@@ -194,21 +200,21 @@ export function PolygonReviewPage() {
   const imageUrl = imagePath ? projectFileUrl(projectId, imagePath) : undefined;
   const imageSize = useImageSize(imageUrl);
   const revision = item && typeof item.revision === "number" ? item.revision : 0;
-  const itemKey = item ? `${itemText(item, "item_id")}:${revision}:${itemText(item, "source")}` : "";
+  const itemKey = item ? polygonItemKey(item) : "";
 
   // Each item (and each new revision of it) starts from what the server sent;
   // `item` changes identity on every queue read, the key says when it is really new.
-  useResetOnItem(itemKey, () => {
-    if (!item) return;
+  useResetOnItem(queue, polygonItemKey, (shown) => {
+    if (!shown) return;
     const polygons = createPolygons(
-      storedList<StoredPolygon>(item, "polygons").map((polygon) => ({
+      storedList<StoredPolygon>(shown, "polygons").map((polygon) => ({
         category: polygon.category,
         points: polygon.points.map(([x, y]) => ({ x, y })),
       })),
     );
     setTool((current) => createPolygonToolState(polygons, current.category || categories[0] || ""));
-    setBoxTool(createBoxToolState(createBoxes(storedList<StoredBox>(item, "boxes"))));
-    setKeyPoints(createKeyPoints(storedList<StoredPoint>(item, "points")));
+    setBoxTool(createBoxToolState(createBoxes(storedList<StoredBox>(shown, "boxes"))));
+    setKeyPoints(createKeyPoints(storedList<StoredPoint>(shown, "points")));
     setSelectedPointId(null);
     setPointDragId(null);
     erasingRef.current = false;

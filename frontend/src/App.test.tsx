@@ -808,6 +808,51 @@ describe("project pages", () => {
     getContext.mockRestore();
   });
 
+  it("shows the next image's own shapes after a drag on the canvas", async () => {
+    class InstantImage {
+      onload: (() => void) | null = null;
+      naturalWidth = 100;
+      naturalHeight = 80;
+      set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+    }
+    vi.stubGlobal("Image", InstantImage);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const square = { category: "cat", points: [[10, 10], [50, 10], [50, 50], [10, 50]] };
+    const triangle = { category: "cat", points: [[60, 10], [90, 10], [75, 40]] };
+    // A real canvas size, so the drag below lands on empty image area.
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+    const items = [
+      { item_id: "p1", image_path: "a.jpg", annotated: false, polygons: [square], source: "prelabel", revision: 0 },
+      { item_id: "p2", image_path: "b.jpg", annotated: false, polygons: [triangle], source: "prelabel", revision: 0 },
+    ];
+    itemList = () => response({ total: 2, offset: 0, limit: 200, items });
+    fetchMock
+      .mockResolvedValueOnce(response({ id: "walls", name: "Walls", task_type: "polygon", summary: { categories: ["cat"], total: 2, pending: 2 } }))
+      .mockResolvedValueOnce(response({ total: 2, offset: 0, limit: 1, items: [items[0]] }))
+      .mockResolvedValueOnce(response({ total: 2, offset: 1, limit: 1, items: [items[1]] }));
+
+    renderAt("/projects/walls/polygon");
+    const canvas = await screen.findByRole("application", { name: "a.jpg" });
+    expect(screen.getByRole("button", { name: /^多边形 #1 4 点/ })).toBeVisible();
+    // A drag that edits nothing still sends pointer moves, whose no-op state
+    // updates React keeps pending; the next image must not fall back to these shapes.
+    const pointer = (type: string, clientX: number, clientY: number) => {
+      const event = new MouseEvent(type, { bubbles: true, clientX, clientY });
+      Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "mouse" } });
+      fireEvent(canvas, event);
+    };
+    pointer("pointerdown", 5, 5);
+    for (const x of [8, 11, 14]) pointer("pointermove", x, 7);
+    pointer("pointerup", 14, 7);
+
+    const strip = screen.getByRole("complementary", { name: "图像列表" });
+    fireEvent.click(await within(strip).findByRole("button", { name: "b.jpg" }));
+    expect(await screen.findByRole("application", { name: "b.jpg" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^多边形 #1 3 点/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: "撤销" })).toBeDisabled();
+  });
+
   it.each(["polygon", "segmentation"])("confirms before discarding an unfinished %s polygon on image navigation", async (taskType) => {
     class InstantImage {
       onload: (() => void) | null = null;

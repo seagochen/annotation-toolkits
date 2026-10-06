@@ -66,11 +66,32 @@ export function useTaskQueue(
   // Items saved during this visit, so the image list can tick them off
   // without re-reading every page of it after each save.
   const [savedIds, setSavedIds] = useState<ReadonlySet<string>>(() => new Set());
+  // The page's `useResetOnItem` handler. Every write of a new queue page calls
+  // it in the same batch, so the page's reset is an ordinary state update of
+  // that batch rather than an update during render (see `useResetOnItem`).
+  const itemListener = useRef<((item: QueueItem | undefined) => void) | null>(null);
+  const shownState = useRef(state);
+  shownState.current = state;
+
+  /** Replace the queue state and let the page reset for the item it now shows. */
+  const show = useCallback((next: QueueState) => {
+    shownState.current = next;
+    setState(next);
+    itemListener.current?.(next.kind === "ready" ? next.queue.items[0] : undefined);
+  }, []);
+  /** Show another queue page of the already loaded project. */
+  const showQueue = useCallback(
+    (queue: QueueResponse) => {
+      const current = shownState.current;
+      if (current.kind === "ready") show({ ...current, queue });
+    },
+    [show],
+  );
 
   const reload = useCallback(async () => {
     if (busy.current) return;
     const version = ++requestVersion.current;
-    setState({ kind: "loading" });
+    show({ kind: "loading" });
     setSubmitError("");
     try {
       const current = viewRef.current;
@@ -80,16 +101,16 @@ export function useTaskQueue(
       ]);
       if (version !== requestVersion.current) return;
       if (project.task_type !== taskType) {
-        setState({ kind: "error", message: wrongType });
+        show({ kind: "error", message: wrongType });
         return;
       }
       onLoad.current?.(project);
-      setState({ kind: "ready", project, queue });
+      show({ kind: "ready", project, queue });
     } catch (error) {
       if (version !== requestVersion.current) return;
-      setState({ kind: "error", message: message(error) });
+      show({ kind: "error", message: message(error) });
     }
-  }, [projectId, taskType, wrongType]);
+  }, [projectId, show, taskType, wrongType]);
 
   useEffect(() => {
     void reload();
@@ -119,7 +140,7 @@ export function useTaskQueue(
           setView(next);
           viewRef.current = next;
         }
-        setState((current) => (current.kind === "ready" ? { ...current, queue } : current));
+        showQueue(queue);
         return true;
       } catch (error) {
         setSubmitError(message(error));
@@ -129,7 +150,7 @@ export function useTaskQueue(
         setSubmitting(false);
       }
     },
-    [projectId],
+    [projectId, showQueue],
   );
 
   /**
@@ -147,13 +168,13 @@ export function useTaskQueue(
         if (version !== requestVersion.current) return;
         setView(next);
         viewRef.current = next;
-        setState((current) => (current.kind === "ready" ? { ...current, queue } : current));
+        showQueue(queue);
       } catch (error) {
         if (version !== requestVersion.current) return;
-        setState({ kind: "error", message: message(error) });
+        show({ kind: "error", message: message(error) });
       }
     },
-    [projectId],
+    [projectId, show, showQueue],
   );
 
   const ready: ReadyQueue | null = state.kind === "ready" ? state : null;
@@ -168,6 +189,7 @@ export function useTaskQueue(
     view,
     browse,
     savedIds,
+    itemListener,
   };
 }
 
@@ -198,15 +220,30 @@ export function QueueFallback({
 }
 
 /**
- * Run `reset` while rendering whenever `key` (the shown item) changes, so the
- * first render of a new item already has fresh page state — an effect would
- * render the previous item's shapes on the new image once, and record the
- * reset in the undo history.
+ * Run `reset(item)` whenever the queue shows an item whose `keyOf` differs
+ * from the last one (and with `undefined` while loading, on an error or when
+ * the queue is empty), so each item starts from fresh page state.
+ *
+ * The queue calls it in the same batch as it stores the new item, so the
+ * first render of a new item already has the reset state and the reset is
+ * never recorded as an undoable edit. It deliberately does not reset during
+ * render: React 18 drops an update made during render when an earlier
+ * no-op update of the same state (a pointer move over the canvas) is still
+ * pending, and the page would then show the previous item's shapes on the
+ * new image.
  */
-export function useResetOnItem(key: string, reset: () => void) {
-  const [current, setCurrent] = useState(key);
-  if (current !== key) {
-    setCurrent(key);
-    reset();
-  }
+export function useResetOnItem(
+  queue: TaskQueue,
+  keyOf: (item: QueueItem) => string,
+  reset: (item: QueueItem | undefined) => void,
+) {
+  const latest = useRef({ keyOf, reset });
+  latest.current = { keyOf, reset };
+  const shownKey = useRef("");
+  queue.itemListener.current = (item) => {
+    const key = item ? latest.current.keyOf(item) : "";
+    if (key === shownKey.current) return;
+    shownKey.current = key;
+    latest.current.reset(item);
+  };
 }

@@ -75,7 +75,7 @@ export function DetectionReviewPage() {
   });
   const { ready, item, submitting, submitError } = queue;
   const itemId = item ? itemText(item, "item_id") : "";
-  useResetOnItem(itemId, () => {
+  useResetOnItem(queue, (shown) => itemText(shown, "item_id"), () => {
     setTool(createBoxToolState());
     setPreviewPoint(null);
     if (mode === "draw") setMode("select");
