@@ -808,6 +808,41 @@ describe("project pages", () => {
     getContext.mockRestore();
   });
 
+  it.each(["polygon", "segmentation"])("confirms before discarding an unfinished %s polygon on image navigation", async (taskType) => {
+    class InstantImage {
+      onload: (() => void) | null = null;
+      naturalWidth = 100;
+      naturalHeight = 80;
+      set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+    }
+    vi.stubGlobal("Image", InstantImage);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const items = [
+      { item_id: "p1", image_path: "a.jpg", annotated: false, polygons: [], source: "none", revision: 0 },
+      { item_id: "p2", image_path: "b.jpg", annotated: false, polygons: [], source: "none", revision: 0 },
+    ];
+    itemList = () => response({ total: 2, offset: 0, limit: 200, items });
+    fetchMock
+      .mockResolvedValueOnce(response({ id: "drafts", name: "Drafts", task_type: taskType, summary: { categories: ["cat"], total: 2, pending: 2 } }))
+      .mockResolvedValueOnce(response({ total: 2, offset: 0, limit: 1, items: [items[0]] }))
+      .mockResolvedValueOnce(response({ total: 2, offset: 1, limit: 1, items: [items[1]] }));
+    renderAt(`/projects/drafts/${taskType === "segmentation" ? "segment" : "polygon"}`);
+    const canvas = await screen.findByRole("application", { name: "a.jpg" });
+    fireEvent.keyDown(window, { key: "p" });
+    const pointer = new MouseEvent("pointerdown", { bubbles: true, clientX: 30, clientY: 30 });
+    Object.defineProperty(pointer, "pointerId", { value: 1 });
+    fireEvent(canvas, pointer);
+    const target = await screen.findByRole("button", { name: "b.jpg" });
+    fireEvent.click(target);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("application", { name: "a.jpg" })).toBeVisible();
+    confirm.mockReturnValue(true);
+    fireEvent.click(target);
+    expect(await screen.findByRole("application", { name: "b.jpg" })).toBeVisible();
+  });
+
   it("starts a polygon item from its prelabel, edits it and submits the revision it started from", async () => {
     class InstantImage {
       onload: (() => void) | null = null;

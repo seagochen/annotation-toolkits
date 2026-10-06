@@ -112,7 +112,7 @@ export function ImageStrip({
   }, [position]);
 
   function open(entry: Entry) {
-    if (!entry.target || entry.id === currentId) return;
+    if (queue.submitting || !entry.target || entry.id === currentId) return;
     if (dirty && !window.confirm("当前图像有未保存的修改，离开后将丢失。确定切换吗？")) return;
     void queue.browse(entry.target);
   }
@@ -127,6 +127,7 @@ export function ImageStrip({
   }
 
   const canStep = (direction: 1 | -1) => {
+    if (queue.submitting) return false;
     if (position < 0) return false;
     for (let index = position + direction; index >= 0 && index < entries.length; index += direction) {
       if (entries[index].target) return true;
@@ -160,7 +161,7 @@ export function ImageStrip({
                 aria-current={current ? "true" : undefined}
                 aria-label={`${entry.path}${entry.done ? "（已标注）" : ""}`}
                 className="image-strip-item"
-                disabled={!entry.target && !current}
+                disabled={queue.submitting || (!entry.target && !current)}
                 onClick={() => open(entry)}
                 title={entry.target || current ? entry.path : `${entry.path}：已提交，该任务的结果不可修改`}
                 type="button"

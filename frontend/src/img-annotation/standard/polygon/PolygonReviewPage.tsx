@@ -521,7 +521,7 @@ export function PolygonReviewPage() {
           <LoadingState>正在读取图像尺寸…</LoadingState>
         )
       }
-      strip={<ImageStrip dirty={history.canUndo} projectId={projectId} queue={queue} revisable />}
+      strip={<ImageStrip dirty={history.canUndo || Boolean(tool.draft?.length)} projectId={projectId} queue={queue} revisable />}
       title="多边形标注"
       tools={[
         [

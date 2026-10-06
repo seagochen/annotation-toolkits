@@ -308,7 +308,7 @@ export function SegmentationReviewPage() {
           <LoadingState>正在读取图像尺寸…</LoadingState>
         )
       }
-      strip={<ImageStrip dirty={history.canUndo} projectId={projectId} queue={queue} />}
+      strip={<ImageStrip dirty={history.canUndo || draftPoints > 0} projectId={projectId} queue={queue} />}
       title="图像分割"
       toolOptions={
         tool === "pan" ? undefined : tool === "polygon" ? (

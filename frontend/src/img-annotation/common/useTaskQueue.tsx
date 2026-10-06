@@ -57,6 +57,9 @@ export function useTaskQueue(
   const onLoad = useRef(options.onLoad);
   onLoad.current = options.onLoad;
   const busy = useRef(false);
+  // Only the latest navigation may replace the displayed item. A slow older
+  // response must not reset edits made after a newer navigation completed.
+  const requestVersion = useRef(0);
   const [view, setView] = useState<QueueView>(PENDING);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -65,6 +68,8 @@ export function useTaskQueue(
   const [savedIds, setSavedIds] = useState<ReadonlySet<string>>(() => new Set());
 
   const reload = useCallback(async () => {
+    if (busy.current) return;
+    const version = ++requestVersion.current;
     setState({ kind: "loading" });
     setSubmitError("");
     try {
@@ -73,6 +78,7 @@ export function useTaskQueue(
         getProject(projectId),
         getQueue(projectId, current.status, current.offset),
       ]);
+      if (version !== requestVersion.current) return;
       if (project.task_type !== taskType) {
         setState({ kind: "error", message: wrongType });
         return;
@@ -80,12 +86,14 @@ export function useTaskQueue(
       onLoad.current?.(project);
       setState({ kind: "ready", project, queue });
     } catch (error) {
+      if (version !== requestVersion.current) return;
       setState({ kind: "error", message: message(error) });
     }
   }, [projectId, taskType, wrongType]);
 
   useEffect(() => {
     void reload();
+    return () => { requestVersion.current += 1; };
   }, [reload]);
 
   /** Save one result; resolves true once saved and the queue re-read. */
@@ -93,6 +101,9 @@ export function useTaskQueue(
     async (itemId: string, result: Record<string, unknown>): Promise<boolean> => {
       if (busy.current) return false;
       busy.current = true;
+      // Invalidate a pending browse before saving; navigation is blocked until
+      // the save and queue refresh finish, so pending offsets stay consistent.
+      requestVersion.current += 1;
       setSubmitting(true);
       setSubmitError("");
       try {
@@ -128,13 +139,17 @@ export function useTaskQueue(
    */
   const browse = useCallback(
     async (next: QueueView): Promise<void> => {
+      if (busy.current) return;
+      const version = ++requestVersion.current;
       setSubmitError("");
       try {
         const queue = await getQueue(projectId, next.status, next.offset);
+        if (version !== requestVersion.current) return;
         setView(next);
         viewRef.current = next;
         setState((current) => (current.kind === "ready" ? { ...current, queue } : current));
       } catch (error) {
+        if (version !== requestVersion.current) return;
         setState({ kind: "error", message: message(error) });
       }
     },
