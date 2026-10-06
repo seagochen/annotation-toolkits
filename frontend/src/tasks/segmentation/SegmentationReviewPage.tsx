@@ -8,12 +8,21 @@ import {
   OptionList,
   PanelSection,
   RangeField,
-  Segmented,
   SubmitBar,
   TaskWorkspace,
 } from "../../components/workspace/TaskWorkspace";
 import { categoryColor, hexToRgb } from "../../components/workspace/palette";
-import { DIGIT_KEYS, MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
+import { BrushIcon, EraserIcon, HandIcon, PolygonIcon } from "../../components/workspace/tool-icons";
+import { useEditHistory } from "../../components/workspace/useEditHistory";
+import {
+  DIGIT_KEYS,
+  MOD_LABEL,
+  REDO_KEYS,
+  SAVE_KEYS,
+  UNDO_KEYS,
+  useHotkeys,
+  type Hotkey,
+} from "../../components/workspace/useHotkeys";
 import { summaryProgress } from "../../project-meta";
 import {
   ImageCanvas,
@@ -33,19 +42,23 @@ import {
   type PolygonToolState,
 } from "../../components/image-canvas/polygon-tool";
 import {
+  cloneRasterBuffer,
   createRasterBuffer,
   fillPolygon,
   toBase64,
   type RasterBuffer,
 } from "../../components/image-canvas/raster-buffer";
+import { ImageStrip } from "../ImageStrip";
 import { useImageSize } from "../useImageSize";
-import { QueueFallback, itemText, summaryStrings, useTaskQueue } from "../useTaskQueue";
+import { QueueFallback, itemText, summaryStrings, useResetOnItem, useTaskQueue } from "../useTaskQueue";
 
 const HANDLE_SCREEN_SIZE = 8;
 const MIN_RADIUS = 1;
 const MAX_RADIUS = 100;
 
-type Tool = "brush" | "erase" | "polygon";
+type Tool = "pan" | "brush" | "erase" | "polygon";
+// Each undo step keeps a whole copy of the mask.
+const HISTORY_LIMIT = 20;
 
 function categoryIndex(categories: readonly string[], category: string): number {
   const index = categories.indexOf(category);
@@ -76,10 +89,15 @@ export function SegmentationReviewPage() {
       const first = summaryStrings(project, "categories")[0] ?? "";
       setCategory(first);
       setPolygonTool(createPolygonToolState([], first));
-      setRaster(null);
     },
   });
   const { ready, item, submitting, submitError } = queue;
+  const history = useEditHistory<RasterBuffer>(HISTORY_LIMIT);
+  useResetOnItem(item ? itemText(item, "item_id") : "", () => {
+    setRaster(null);
+    setPolygonTool((current) => createPolygonToolState([], current.category));
+    history.clear();
+  });
   const imagePath = item ? itemText(item, "image_path") : undefined;
   const imageUrl = imagePath ? projectFileUrl(projectId, imagePath) : undefined;
   const imageSize = useImageSize(imageUrl);
@@ -126,19 +144,18 @@ export function SegmentationReviewPage() {
    * polygon into the mask with its category.
    */
   function updatePolygons(change: (current: PolygonToolState) => PolygonToolState) {
-    setPolygonTool((current) => {
-      const next = change(current);
-      if (next.polygons.length > current.polygons.length) {
-        const finished = next.polygons[next.polygons.length - 1];
-        setRaster(
-          (buffer) =>
-            buffer && {
-              ...fillPolygon(buffer, finished.points, categoryIndex(categories, finished.category)),
-            },
-        );
-      }
-      return next;
-    });
+    const next = change(polygonTool);
+    setPolygonTool(next);
+    if (raster && next.polygons.length > polygonTool.polygons.length) {
+      const finished = next.polygons[next.polygons.length - 1];
+      history.record(cloneRasterBuffer(raster));
+      setRaster(
+        (buffer) =>
+          buffer && {
+            ...fillPolygon(buffer, finished.points, categoryIndex(categories, finished.category)),
+          },
+      );
+    }
   }
 
   function handlePointer(event: ImageCanvasPointerEvent) {
@@ -150,19 +167,28 @@ export function SegmentationReviewPage() {
       }
       return;
     }
+    if (event.phase === "down") history.record(cloneRasterBuffer(raster));
     paint(event, radius, () => activeIndex);
   }
 
+  function restore(step: (current: RasterBuffer) => RasterBuffer | undefined) {
+    if (!raster) return;
+    const previous = step(cloneRasterBuffer(raster));
+    if (previous) setRaster(previous);
+  }
+  function undo() {
+    // While outlining a polygon, undo takes back its last point first.
+    if (polygonTool.draft?.length) setPolygonTool(undoLastPoint);
+    else restore(history.undo);
+  }
+  const redo = () => restore(history.redo);
+
   async function submit() {
     if (!item || !raster) return;
-    const saved = await queue.submit(itemText(item, "item_id"), {
+    await queue.submit(itemText(item, "item_id"), {
       image_size: { width: raster.width, height: raster.height },
       pixels: toBase64(raster),
     });
-    if (saved) {
-      setRaster(null);
-      setPolygonTool(createPolygonToolState([], category));
-    }
   }
 
   function chooseCategory(next: string) {
@@ -190,6 +216,7 @@ export function SegmentationReviewPage() {
         if (next) chooseCategory(next);
       },
     },
+    { keys: ["h"], display: "H", description: "拖动画布", run: () => setTool("pan") },
     { keys: ["b"], display: "B", description: "画笔", run: () => setTool("brush") },
     { keys: ["e"], display: "E", description: "橡皮擦", run: () => setTool("erase") },
     { keys: ["p"], display: "P", description: "多边形", run: () => setTool("polygon") },
@@ -209,6 +236,8 @@ export function SegmentationReviewPage() {
       description: "放弃当前多边形",
       run: () => setPolygonTool((current) => cancelDraft(current)),
     },
+    { keys: UNDO_KEYS, display: `${MOD_LABEL} + Z`, description: "撤销（绘制多边形时撤销一点）", run: undo },
+    { keys: REDO_KEYS, display: `${MOD_LABEL} + Shift + Z`, description: "重做", run: redo },
     {
       keys: SAVE_KEYS,
       display: `${MOD_LABEL} + Enter`,
@@ -244,47 +273,19 @@ export function SegmentationReviewPage() {
       }
       hints={CANVAS_HINTS}
       hotkeys={hotkeys}
+      history={{ canUndo: history.canUndo || draftPoints > 0, canRedo: history.canRedo, undo, redo }}
       panel={
-        <>
-          <PanelSection title="类别">
-            <OptionList
-              label="分割类别"
-              name="segmentation-category"
-              onToggle={chooseCategory}
-              options={categories}
-              selected={[category]}
-              swatches
-            />
-          </PanelSection>
-          <PanelSection title="工具">
-            <Segmented
-              label="标注工具"
-              onChange={setTool}
-              options={[
-                { value: "brush", label: "画笔", key: "B" },
-                { value: "erase", label: "橡皮", key: "E" },
-                { value: "polygon", label: "多边形", key: "P" },
-              ]}
-              value={tool}
-            />
-            {tool === "polygon" ? (
-              <p className="panel-note">
-                {draftPoints === 0
-                  ? "逐点单击勾勒区域，点回起点或按 Enter 闭合并填充。"
-                  : `已放置 ${draftPoints} 个点${draftPoints >= 3 ? "，按 Enter 闭合" : ""}；Esc 放弃。`}
-              </p>
-            ) : (
-              <RangeField
-                label="画笔半径"
-                max={MAX_RADIUS}
-                min={MIN_RADIUS}
-                onChange={setRadius}
-                unit="px"
-                value={radius}
-              />
-            )}
-          </PanelSection>
-        </>
+        <PanelSection title="类别">
+          <OptionList
+            label="分割类别"
+            name="segmentation-category"
+            onToggle={chooseCategory}
+            options={categories}
+            selected={[category]}
+            swatches
+          />
+          <p className="panel-note">掩膜每个像素只属于一个类别；后画的类别会覆盖先画的。</p>
+        </PanelSection>
       }
       progress={summaryProgress(ready.project.summary, ready.queue.total)}
       projectId={projectId}
@@ -295,7 +296,7 @@ export function SegmentationReviewPage() {
           <ImageCanvas
             alt={imagePath ?? ""}
             imageSize={imageSize}
-            interactionMode="tool"
+            interactionMode={tool === "pan" ? "pan" : "tool"}
             layers={[layer]}
             onPointerEvent={handlePointer}
             onViewportChange={(next) => {
@@ -307,7 +308,34 @@ export function SegmentationReviewPage() {
           <LoadingState>正在读取图像尺寸…</LoadingState>
         )
       }
+      strip={<ImageStrip dirty={history.canUndo} projectId={projectId} queue={queue} />}
       title="图像分割"
+      toolOptions={
+        tool === "pan" ? undefined : tool === "polygon" ? (
+          <p className="panel-note">
+            {draftPoints === 0
+              ? `逐点单击勾勒一个「${category}」区域，点回起点或按 Enter 闭合并填充。`
+              : `已放置 ${draftPoints} 个点${draftPoints >= 3 ? "，按 Enter 闭合" : ""}；Esc 放弃。`}
+          </p>
+        ) : (
+          <RangeField
+            label={tool === "erase" ? "橡皮半径" : "画笔半径"}
+            max={MAX_RADIUS}
+            min={MIN_RADIUS}
+            onChange={setRadius}
+            unit="px"
+            value={radius}
+          />
+        )
+      }
+      tools={[
+        [{ id: "pan", label: "拖动画布", icon: <HandIcon />, shortcut: "H", active: tool === "pan", onSelect: () => setTool("pan") }],
+        [
+          { id: "brush", label: "画笔", icon: <BrushIcon />, shortcut: "B", active: tool === "brush", onSelect: () => setTool("brush") },
+          { id: "erase", label: "橡皮擦", icon: <EraserIcon />, shortcut: "E", active: tool === "erase", onSelect: () => setTool("erase") },
+          { id: "polygon", label: "多边形", icon: <PolygonIcon />, shortcut: "P", active: tool === "polygon", onSelect: () => setTool("polygon") },
+        ],
+      ]}
     />
   );
 }

@@ -316,7 +316,10 @@ class ImageTaskStore:
                     continue
                 if query and query not in path.lower():
                     continue
-                selected.append(self.item_view(key, path, saved))
+                # Every image task's queue items say whether a result exists, so
+                # the image list can mark finished items without knowing the
+                # task's own result fields (an empty detection is still done).
+                selected.append({**self.item_view(key, path, saved), "annotated": saved is not None})
             page = selected[request.offset : request.offset + request.limit]
             return QueuePage(
                 total=len(selected),

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 /**
  * ImageCanvas needs to know an image's pixel size before it can render it
@@ -7,19 +7,23 @@ import { useEffect, useState } from "react";
  * `naturalWidth`/`naturalHeight` for a plain `<img>`.
  */
 export function useImageSize(src: string | undefined) {
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const [loaded, setLoaded] = useState<{ src: string; width: number; height: number } | null>(null);
   useEffect(() => {
-    setSize(null);
     if (!src) return;
     let active = true;
     const image = new Image();
     image.onload = () => {
-      if (active) setSize({ width: image.naturalWidth, height: image.naturalHeight });
+      if (active) setLoaded({ src, width: image.naturalWidth, height: image.naturalHeight });
     };
     image.src = src;
     return () => {
       active = false;
     };
   }, [src]);
-  return size;
+  // Keyed by src: right after the item changes, the previous image's size
+  // must not be used (a mask would be allocated at the wrong size).
+  return useMemo(
+    () => (loaded && loaded.src === src ? { width: loaded.width, height: loaded.height } : null),
+    [loaded, src],
+  );
 }

@@ -77,6 +77,22 @@ export async function getQueue(
   return data;
 }
 
+/** One page of every queue item, finished or not, for the image list. */
+export async function listQueueItems(
+  projectId: string,
+  offset: number,
+  limit: number,
+): Promise<QueueResponse> {
+  const { data, error, response } = await client.GET(
+    "/api/projects/{project_id}/queue",
+    { params: { path: { project_id: projectId }, query: { offset, limit } } },
+  );
+  if (!response.ok || !data) {
+    throw new ApiError(response.status, errorMessage(error, "无法读取图像列表"));
+  }
+  return data;
+}
+
 export async function submitAnnotation(
   projectId: string,
   itemId: string,

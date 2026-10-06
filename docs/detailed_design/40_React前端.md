@@ -114,30 +114,57 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 
 ## 6. 标注工作台（`components/workspace/`）
 
-所有任务页（含 ReID 审核）都渲染同一个 `TaskWorkspace`：
+所有任务页（含 ReID 审核）都渲染同一个 `TaskWorkspace`，布局参照 Roboflow 的标注界面，
+从左到右四栏（进入标注页时全局 `SideNav` 固定为图标栏，`compact`，不改用户保存的偏好）：
 
 | 区域 | 内容 |
 |---|---|
-| 顶栏（工作区内） | 返回项目、任务名、当前文件名、进度条（`已完成 / 总数`）、剩余数（`.queue-count`） |
-| 舞台 | 画布、图片或文本，占满工作区剩余高度，页面本身不滚动；文本条目（`media: "text"`）由 `tasks/ItemStage.tsx` 的 `TextDocument` 显示为可在舞台内滚动的文档（保留空白与换行），`text_error` 原样显示 |
-| 侧栏 | 类别/工具等面板（`PanelSection`、`OptionList`、`Segmented`、`RangeField`），可折叠的快捷键列表；底部固定 `SubmitBar`（保存按钮、禁用原因、保存失败与重试） |
+| 左栏 | 顶部：返回项目、`项目名 · 任务名`（`h1` 只含任务名）、当前文件名。其下一列图标页签切换面板：**标注**（页面的 `panel`）、**快捷键**（`hotkeys` + `hints`）、**原始数据**（页面传 `rawData` 时出现，显示将要提交的 `result`）。底部固定：进度条（`已完成 / 总数`）、剩余数（`.queue-count`）与 `SubmitBar`（保存按钮、禁用原因、保存失败与重试） |
+| 舞台 | 画布、图片或文本，占满剩余高度，页面本身不滚动；文本条目（`media: "text"`）由 `tasks/ItemStage.tsx` 的 `TextDocument` 显示为可在舞台内滚动的文档（保留空白与换行），`text_error` 原样显示。`ImageCanvas` 左下角是缩放条（`−` 比例 `+` 适应） |
+| 工具栏 | 画布页传 `tools`（分组的按钮：图标、名称、快捷键）与 `history`（撤销/重做）时，舞台右上角浮出竖向工具栏；`toolOptions`（画笔半径等当前工具的设置）浮在工具栏左侧 |
+| 图像列表 | 页面传 `strip` 时的最右栏：`tasks/ImageStrip.tsx`，见下 |
+
+左栏面板内的组件：`PanelSection`、`OptionList`、`Segmented`、`RangeField`；检测与多边形
+用 `AnnotationTabs` 把"类别"（带本图计数的类别图例）与"图层"（本图的框/多边形列表，
+可选中、删除）放在"标注 N"下的两个页签里。
+
+**图像列表**（`ImageStrip`，ReID 之外的任务页都有）：不带 `status` 分页读取全部条目
+（每页 200，"加载更多"续读），每项一张缩略图（文本条目为文档图标）、文件名，已完成的
+（队列 item 的 `annotated`，或本次访问中保存过的 `useTaskQueue().savedIds`）打勾。
+标题下 `‹ N / M ›` 显示当前条目在全部条目中的位置并跳到上/下一个可打开的条目。
+点击未完成条目 = `browse({ status: "pending", offset: 它之前的未完成条目数 })`；已完成
+条目只在结果可修改的任务（多边形，`revisable`）中可打开（`status: "annotated"`），其他
+任务里禁用。当前条目有未保存的修改（页面传 `dirty`，画布页即"有可撤销的步骤"）时，
+跳转前确认。从队列中间保存了最后一个待标注条目时，`useTaskQueue` 回到 `offset 0`
+继续。页面在条目变化时用 `useResetOnItem(item_id, reset)` 在渲染中重置自己的状态
+（而不是在 `onLoad`/提交成功后），所以从列表跳转与保存后前进走同一条路径。
+
+**撤销/重做**（`useEditHistory`）：保存整份编辑状态的快照栈。检测与多边形用
+`useRecordChanges` 记录框/多边形数组每次"落定"的值（拖动中传 `null`，一次拖动算一步；
+撤销恢复的值经 `markApplied` 标记，不再重复记录）；分割与深度的像素是原地修改的，
+所以在每一笔（`pointerdown`）和每次多边形填充前 `record(cloneRasterBuffer(raster))`，
+最多 20 步。绘制多边形途中，撤销先撤回草稿的最后一点。换条目时历史清空。
+
+`useImageSize(src)` 返回的尺寸以 `src` 为键：条目刚切换时返回 `null` 而不是上一张图的
+尺寸，避免掩膜按旧尺寸分配。
 
 进度由 `project-meta.ts` 的 `summaryProgress()` 计算：图像任务取 `summary.total`，
 ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`（队列在每次提交后
 刷新，`summary` 只在进入页面时读取一次）。
 
-**页面级快捷键**（`useHotkeys`）挂在 `window` 上，不要求画布聚焦；在文本输入框中
+**页面级快捷键**（`useHotkeys`）挂在 `window` 上（键名小写；按住 Ctrl/⌘ 时为 `mod+键`，再按 Shift 为 `mod+shift+键`），不要求画布聚焦；在文本输入框中
 不触发（`allowInText` 的绑定除外），聚焦按钮时不拦截 Enter/空格。`ImageCanvas` 自带的
 缩放/平移键（`+`/`-`/`0`/方向键/空格拖动）仍只在画布聚焦时生效。
 
 | 页面 | 快捷键 |
 |---|---|
 | 全部（ReID 除外） | `Ctrl/⌘ + Enter` 保存并继续（描述页在输入框内也可用） |
+| 全部画布页 | `H` 拖动画布工具、`Ctrl/⌘ + Z` 撤销、`Ctrl/⌘ + Shift + Z` 或 `Ctrl/⌘ + Y` 重做 |
 | 分类 | `1`–`9` 选择/切换第 N 个标签 |
 | 文本片段 | 拖选文本新建片段（当前标签）、`1`–`9` 选择标签（选中片段时改为该标签）、`Del`/`Backspace` 删除选中片段、`Esc` 取消选中 |
-| 检测 | `1`–`9` 选择类别（选中框时改为该类别）、`B` 绘制新框、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中 |
+| 检测 | `1`–`9` 选择类别（选中框时改为该类别）、`V` 选择、`B` 绘制新框、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中 |
 | 分割 | `1`–`9` 选择类别、`B` 画笔、`E` 橡皮、`P` 多边形、`[`/`]` 画笔半径、`Enter` 闭合多边形、`Backspace` 撤销最后一点、`Esc` 放弃多边形 |
-| 多边形 | `1`–`9` 选择类别（选中多边形时改为该类别）、`P` 绘制新多边形/回到编辑、`Enter` 闭合、`Backspace` 绘制时撤销一点（编辑时同 Del）、`Del` 删除选中顶点（未选顶点时删除多边形）、`Esc` 放弃绘制/取消选中；拖动顶点移动，点击选中多边形的边插入顶点 |
+| 多边形 | `1`–`9` 选择类别（选中多边形时改为该类别）、`V` 选择、`P` 绘制新多边形/回到编辑、`Enter` 闭合、`Backspace` 绘制时撤销一点（编辑时同 Del）、`Del` 删除选中顶点（未选顶点时删除多边形）、`Esc` 放弃绘制/取消选中；拖动顶点移动，点击选中多边形的边插入顶点 |
 | 深度 | `1` 提高、`2` 降低、`X` 切换方向、`[`/`]` 画笔半径 |
 | ReID | `1` 同一人、`2` 不同人、`3` 不确定（按下即提交） |
 
@@ -161,7 +188,7 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 `polygon-tool.ts` 的状态，按条目的 `item_id` + `revision` + `source` 判断是否需要
 重新初始化。提交带上条目的 `revision` 作为 `base_revision`，409 时提示并提供
 "重新载入"。`useTaskQueue` 的 `browse({ status, offset })` 让页面在"待标注"与
-"已提交"之间切换并逐张翻页（`status=annotated&offset=N&limit=1`），于是已提交的
+"已提交"之间切换，并从图像列表打开任意一张（`status=annotated&offset=N&limit=1`），于是已提交的
 结果可以再次修改、生成新版本。浏览器加载出的图片尺寸与预标/已保存结果的尺寸不一致
 时，侧栏提示（后端会拒绝这种提交）。项目概览页把 `summary.prelabel_issues` 渲染为
 "未加载的预标"表格。

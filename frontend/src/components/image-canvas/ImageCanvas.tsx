@@ -291,9 +291,10 @@ export function ImageCanvas({
         />
       ))}
       <div className="image-canvas-controls" aria-label="画布视图控制">
-        <button aria-label="放大" onClick={() => setViewport(zoomAt(viewport, 1.2, { x: canvasSize.width / 2, y: canvasSize.height / 2 }, scaleLimits))} type="button">+</button>
         <button aria-label="缩小" onClick={() => setViewport(zoomAt(viewport, 1 / 1.2, { x: canvasSize.width / 2, y: canvasSize.height / 2 }, scaleLimits))} type="button">−</button>
-        <button aria-label="适应窗口" onClick={fit} type="button">适应</button>
+        <output aria-label="缩放比例" className="image-canvas-zoom">{Math.round(viewport.scale * 100)}%</output>
+        <button aria-label="放大" onClick={() => setViewport(zoomAt(viewport, 1.2, { x: canvasSize.width / 2, y: canvasSize.height / 2 }, scaleLimits))} type="button">+</button>
+        <button aria-label="适应窗口" className="image-canvas-fit" onClick={fit} type="button">适应</button>
       </div>
     </div>
   );

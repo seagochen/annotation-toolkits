@@ -100,7 +100,7 @@ def test_without_prelabels_every_image_starts_blank(tmp_path):
     assert sorted(queued) == sorted(IMAGES)
     assert queued["a.jpg"] == {
         "item_id": queued["a.jpg"]["item_id"], "image_path": "a.jpg", "revision": 0,
-        "source": "none", "image_size": None, "polygons": [],
+        "source": "none", "image_size": None, "polygons": [], "annotated": False,
     }
     status = module.status(project)
     assert status.state == "reviewing"

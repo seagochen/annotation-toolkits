@@ -60,6 +60,9 @@ export function useTaskQueue(
   const [view, setView] = useState<QueueView>(PENDING);
   const viewRef = useRef(view);
   viewRef.current = view;
+  // Items saved during this visit, so the image list can tick them off
+  // without re-reading every page of it after each save.
+  const [savedIds, setSavedIds] = useState<ReadonlySet<string>>(() => new Set());
 
   const reload = useCallback(async () => {
     setState({ kind: "loading" });
@@ -94,8 +97,17 @@ export function useTaskQueue(
       setSubmitError("");
       try {
         await submitAnnotation(projectId, itemId, result);
-        const current = viewRef.current;
-        const queue = await getQueue(projectId, current.status, current.offset);
+        setSavedIds((current) => new Set(current).add(itemId));
+        let next = viewRef.current;
+        let queue = await getQueue(projectId, next.status, next.offset);
+        if (!queue.items.length && queue.total > 0 && next.offset > 0) {
+          // Saved the last item after a jump into the middle of the queue:
+          // carry on from the first one still left.
+          next = { status: next.status, offset: 0 };
+          queue = await getQueue(projectId, next.status, next.offset);
+          setView(next);
+          viewRef.current = next;
+        }
         setState((current) => (current.kind === "ready" ? { ...current, queue } : current));
         return true;
       } catch (error) {
@@ -140,8 +152,11 @@ export function useTaskQueue(
     submitError,
     view,
     browse,
+    savedIds,
   };
 }
+
+export type TaskQueue = ReturnType<typeof useTaskQueue>;
 
 /**
  * What a task page shows instead of its workspace: loading, an error with
@@ -154,7 +169,7 @@ export function QueueFallback({
   doneTitle,
   doneDescription,
 }: {
-  queue: ReturnType<typeof useTaskQueue>;
+  queue: TaskQueue;
   projectId: string;
   loading: string;
   doneTitle: string;
@@ -165,4 +180,18 @@ export function QueueFallback({
     return <ErrorState message={queue.state.message} onRetry={() => void queue.reload()} />;
   }
   return <CompleteState description={doneDescription} projectId={projectId} title={doneTitle} />;
+}
+
+/**
+ * Run `reset` while rendering whenever `key` (the shown item) changes, so the
+ * first render of a new item already has fresh page state — an effect would
+ * render the previous item's shapes on the new image once, and record the
+ * reset in the undo history.
+ */
+export function useResetOnItem(key: string, reset: () => void) {
+  const [current, setCurrent] = useState(key);
+  if (current !== key) {
+    setCurrent(key);
+    reset();
+  }
 }

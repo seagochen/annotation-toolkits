@@ -48,6 +48,22 @@ def test_annotated_and_pending_filters_partition_the_queue(tmp_path):
     assert [item["image_path"] for item in pending.items] == ["b.jpg"]
 
 
+def test_unfiltered_queue_marks_which_items_are_annotated(tmp_path):
+    # The image list ticks finished items off; an empty detection is finished too.
+    module, project, images = detection_project(tmp_path)
+    (images / "b.jpg").write_bytes(b"jpeg")
+    sidecar = images / ".annotations" / "detection.json"
+    sidecar.parent.mkdir()
+    sidecar.write_text(json.dumps({"schema": 1, "items": {item_id("a.jpg"): {
+        "image_path": "a.jpg", "image_size": {"width": 2, "height": 2}, "boxes": []}},
+        "history": []}), encoding="utf-8")
+    page = module.queue(project, QueueRequest())
+    assert [(item["image_path"], item["annotated"]) for item in page.items] == [
+        ("a.jpg", True),
+        ("b.jpg", False),
+    ]
+
+
 def test_a_malformed_stored_item_is_reported_not_a_key_error(tmp_path):
     module, project, images = detection_project(tmp_path)
     sidecar = images / ".annotations" / "detection.json"

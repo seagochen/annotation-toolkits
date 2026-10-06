@@ -4,8 +4,9 @@ import { useParams } from "wouter";
 import { PanelSection, SubmitBar, TaskWorkspace } from "../../components/workspace/TaskWorkspace";
 import { MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
 import { summaryProgress } from "../../project-meta";
+import { ImageStrip } from "../ImageStrip";
 import { ItemStage, isTextItem } from "../ItemStage";
-import { QueueFallback, itemText, useTaskQueue } from "../useTaskQueue";
+import { QueueFallback, itemText, useResetOnItem, useTaskQueue } from "../useTaskQueue";
 
 // Same limits as caption_task.py: captions vs. text generated for a document.
 const MAX_CAPTION_LENGTH = 2000;
@@ -17,14 +18,14 @@ export function CaptionReviewPage() {
   const queue = useTaskQueue(projectId, {
     taskType: "captioning",
     wrongType: "该项目不是描述 / 文本生成任务。",
-    onLoad: () => setCaption(""),
   });
   const { ready, item, submitting, submitError } = queue;
+  useResetOnItem(item ? itemText(item, "item_id") : "", () => setCaption(""));
   const trimmed = caption.trim();
 
   async function submit() {
     if (!item || !trimmed) return;
-    if (await queue.submit(itemText(item, "item_id"), { caption: trimmed })) setCaption("");
+    await queue.submit(itemText(item, "item_id"), { caption: trimmed });
   }
 
   const hotkeys: Hotkey[] = [
@@ -86,8 +87,10 @@ export function CaptionReviewPage() {
       progress={summaryProgress(ready.project.summary, ready.queue.total)}
       projectId={projectId}
       projectName={ready.project.name}
+      rawData={{ caption: trimmed }}
       remaining={ready.queue.total}
       stage={<ItemStage item={item} projectId={projectId} />}
+      strip={<ImageStrip dirty={trimmed !== ""} projectId={projectId} queue={queue} title={isText ? "文档" : "图像"} />}
       title={isText ? "文本生成" : "图像描述"}
       unit={isText ? "篇" : "张"}
     />

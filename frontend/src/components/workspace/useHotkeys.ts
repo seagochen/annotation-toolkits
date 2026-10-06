@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
 
 export type Hotkey = Readonly<{
-  /** `event.key`, lower-cased; prefix `mod+` for Ctrl (or ⌘ on macOS). */
+  /**
+   * `event.key`, lower-cased; prefix `mod+` for Ctrl (or ⌘ on macOS), and
+   * `mod+shift+` when Shift is held as well.
+   */
   keys: readonly string[];
   /** What the shortcut list shows, e.g. "1–9" or "Ctrl + Enter". */
   display: string;
@@ -25,7 +28,8 @@ function typingTarget(target: EventTarget | null): boolean {
 
 function eventKey(event: KeyboardEvent): string {
   const key = event.key.toLowerCase();
-  return event.ctrlKey || event.metaKey ? `mod+${key}` : key;
+  if (!event.ctrlKey && !event.metaKey) return key;
+  return event.shiftKey ? `mod+shift+${key}` : `mod+${key}`;
 }
 
 /**
@@ -58,6 +62,10 @@ export function useHotkeys(hotkeys: readonly Hotkey[], enabled = true) {
 export const DIGIT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 
 export const SAVE_KEYS = ["mod+enter"] as const;
+
+export const UNDO_KEYS = ["mod+z"] as const;
+
+export const REDO_KEYS = ["mod+shift+z", "mod+y"] as const;
 
 /** How to spell the `mod+` modifier for this platform in shortcut hints. */
 export const MOD_LABEL =

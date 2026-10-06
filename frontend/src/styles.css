@@ -17,6 +17,7 @@
   --danger-soft: #f5ddd4;
   --focus: #d28c55;
   --stage: #111814;
+  --stage-light: #e7eae3;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   color: var(--ink);

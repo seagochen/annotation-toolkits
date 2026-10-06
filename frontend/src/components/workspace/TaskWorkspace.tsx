@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "wouter";
 
 import type { Progress } from "../../project-meta";
 import { categoryColor } from "./palette";
+import { BackIcon, CodeIcon, KeyboardIcon, LabelsIcon, RedoIcon, UndoIcon } from "./tool-icons";
 import { MOD_LABEL, type Hotkey } from "./useHotkeys";
 import "./workspace.css";
 
@@ -15,11 +16,32 @@ export const CANVAS_HINTS: readonly ShortcutHint[] = [
   { display: "0", description: "适应窗口（画布聚焦时）" },
 ];
 
+/** One button of the canvas tool rail. */
+export type WorkspaceTool = Readonly<{
+  id: string;
+  label: string;
+  icon: ReactNode;
+  /** Shown in the tooltip, e.g. "B". */
+  shortcut?: string;
+  active: boolean;
+  onSelect: () => void;
+}>;
+
+export type HistoryControls = Readonly<{
+  canUndo: boolean;
+  canRedo: boolean;
+  undo: () => void;
+  redo: () => void;
+}>;
+
+type PanelTab = "annotate" | "shortcuts" | "raw";
+
 /**
- * The full-viewport frame every annotation page shares: a slim bar with
- * where-am-I and progress, the image/canvas filling the rest, and a side
- * panel whose footer keeps the save button in place however long the
- * panel's content gets.
+ * The full-viewport frame every annotation page shares, laid out like
+ * Roboflow's annotator: on the left an icon rail switching the side panel
+ * (annotation panel, shortcuts, raw result) above a fixed save footer; the
+ * canvas in the middle with a floating vertical tool rail; and, when the page
+ * passes one, the image list on the right.
  */
 export function TaskWorkspace({
   projectId,
@@ -34,6 +56,11 @@ export function TaskWorkspace({
   footer,
   hotkeys = [],
   hints = [],
+  tools,
+  history,
+  toolOptions,
+  strip,
+  rawData,
 }: {
   projectId: string;
   projectName: string;
@@ -47,71 +74,208 @@ export function TaskWorkspace({
   footer: ReactNode;
   hotkeys?: readonly Hotkey[];
   hints?: readonly ShortcutHint[];
+  /** Canvas tools, in groups separated by a divider. */
+  tools?: readonly (readonly WorkspaceTool[])[];
+  history?: HistoryControls;
+  /** Settings of the active tool (brush size…), floated beside the tool rail. */
+  toolOptions?: ReactNode;
+  /** The image list column (see tasks/ImageStrip). */
+  strip?: ReactNode;
+  /** The result as it would be saved, shown in the "原始数据" tab. */
+  rawData?: unknown;
 }) {
+  const [tab, setTab] = useState<PanelTab>("annotate");
   const percent = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
   const shortcuts = [...hotkeys, ...hints];
+  const tabs: { id: PanelTab; label: string; icon: ReactNode }[] = [
+    { id: "annotate", label: "标注", icon: <LabelsIcon /> },
+    ...(shortcuts.length ? [{ id: "shortcuts" as const, label: "快捷键", icon: <KeyboardIcon /> }] : []),
+    ...(rawData !== undefined ? [{ id: "raw" as const, label: "原始数据", icon: <CodeIcon /> }] : []),
+  ];
+  const activeTab = tabs.some((candidate) => candidate.id === tab) ? tab : "annotate";
+  const hasRail = Boolean(tools?.length || history);
+
   return (
-    <section className="workspace">
-      <header className="workspace-bar">
-        <div className="workspace-where">
-          <Link className="workspace-back" to={`/projects/${projectId}`}>
-            ← {projectName}
+    <section className={strip ? "workspace has-strip" : "workspace"}>
+      <aside aria-label="标注面板" className="workspace-side">
+        <header className="workspace-head">
+          <Link aria-label={`返回 ${projectName}`} className="workspace-back" to={`/projects/${projectId}`}>
+            <BackIcon />
           </Link>
-          <h1>{title}</h1>
-          {fileName && (
-            <span className="workspace-file" title={fileName}>
-              {fileName}
-            </span>
-          )}
-        </div>
-        <div className="workspace-progress">
-          {progress && (
-            <div
-              aria-label="标注进度"
-              aria-valuemax={progress.total}
-              aria-valuemin={0}
-              aria-valuenow={progress.done}
-              className="progress-track"
-              role="progressbar"
-            >
-              <span style={{ width: `${percent}%` }} />
+          <div className="workspace-where">
+            <div className="workspace-crumb">
+              <span className="workspace-project">{projectName}</span>
+              <span aria-hidden="true">·</span>
+              <h1>{title}</h1>
             </div>
-          )}
-          {progress && (
-            <span className="progress-label">
-              已完成 {progress.done} / {progress.total}
-            </span>
-          )}
-          <div className="queue-count">
-            <strong>{remaining}</strong>
-            <span>{unit}待处理</span>
-          </div>
-        </div>
-      </header>
-      <div className="workspace-body">
-        <div className="workspace-stage">{stage}</div>
-        <aside className="workspace-panel" aria-label="标注面板">
-          <div className="workspace-panel-content">
-            {panel}
-            {shortcuts.length > 0 && (
-              <details className="shortcut-list">
-                <summary>快捷键</summary>
-                <dl>
-                  {shortcuts.map((shortcut) => (
-                    <div key={`${shortcut.display}-${shortcut.description}`}>
-                      <dt>
-                        <kbd>{shortcut.display}</kbd>
-                      </dt>
-                      <dd>{shortcut.description}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </details>
+            {fileName && (
+              <span className="workspace-file" title={fileName}>
+                {fileName}
+              </span>
             )}
           </div>
-          <div className="workspace-panel-footer">{footer}</div>
-        </aside>
+        </header>
+        <div className="workspace-side-body">
+          <nav aria-label="面板" className="workspace-tabs">
+            {tabs.map((candidate) => (
+              <button
+                aria-pressed={candidate.id === activeTab}
+                className="workspace-tab"
+                key={candidate.id}
+                onClick={() => setTab(candidate.id)}
+                type="button"
+              >
+                {candidate.icon}
+                <span>{candidate.label}</span>
+              </button>
+            ))}
+          </nav>
+          <div className="workspace-panel">
+            <div className="workspace-panel-content">
+              {activeTab === "annotate" && panel}
+              {activeTab === "shortcuts" && <ShortcutList shortcuts={shortcuts} />}
+              {activeTab === "raw" && (
+                <PanelSection title="原始数据">
+                  <p className="panel-note">保存时提交的结果（未保存的修改也已反映在内）。</p>
+                  <pre className="raw-data">{JSON.stringify(rawData, null, 2)}</pre>
+                </PanelSection>
+              )}
+            </div>
+            <div className="workspace-panel-footer">
+              <div className="workspace-progress">
+                {progress && (
+                  <div
+                    aria-label="标注进度"
+                    aria-valuemax={progress.total}
+                    aria-valuemin={0}
+                    aria-valuenow={progress.done}
+                    className="progress-track"
+                    role="progressbar"
+                  >
+                    <span style={{ width: `${percent}%` }} />
+                  </div>
+                )}
+                <div className="progress-text">
+                  {progress && (
+                    <span className="progress-label">
+                      已完成 {progress.done} / {progress.total}
+                    </span>
+                  )}
+                  <div className="queue-count">
+                    <strong>{remaining}</strong>
+                    <span>{unit}待处理</span>
+                  </div>
+                </div>
+              </div>
+              {footer}
+            </div>
+          </div>
+        </div>
+      </aside>
+      <div className="workspace-stage">
+        {stage}
+        {hasRail && (
+          <div aria-label="标注工具" aria-orientation="vertical" className="tool-rail" role="toolbar">
+            {tools?.map((group, index) => (
+              <div className="tool-group" key={index}>
+                {group.map((tool) => (
+                  <button
+                    aria-label={tool.label}
+                    aria-pressed={tool.active}
+                    className="tool-button"
+                    key={tool.id}
+                    onClick={tool.onSelect}
+                    title={tool.shortcut ? `${tool.label}（${tool.shortcut}）` : tool.label}
+                    type="button"
+                  >
+                    {tool.icon}
+                  </button>
+                ))}
+              </div>
+            ))}
+            {history && (
+              <div className="tool-group">
+                <button
+                  aria-label="撤销"
+                  className="tool-button"
+                  disabled={!history.canUndo}
+                  onClick={history.undo}
+                  title={`撤销（${MOD_LABEL} + Z）`}
+                  type="button"
+                >
+                  <UndoIcon />
+                </button>
+                <button
+                  aria-label="重做"
+                  className="tool-button"
+                  disabled={!history.canRedo}
+                  onClick={history.redo}
+                  title={`重做（${MOD_LABEL} + Shift + Z）`}
+                  type="button"
+                >
+                  <RedoIcon />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {toolOptions && (
+          <div aria-label="工具选项" className={hasRail ? "tool-options" : "tool-options no-rail"} role="group">
+            {toolOptions}
+          </div>
+        )}
       </div>
+      {strip}
+    </section>
+  );
+}
+
+function ShortcutList({ shortcuts }: { shortcuts: readonly ShortcutHint[] }) {
+  return (
+    <PanelSection title="快捷键">
+      <dl className="shortcut-list">
+        {shortcuts.map((shortcut) => (
+          <div key={`${shortcut.display}-${shortcut.description}`}>
+            <dt>
+              <kbd>{shortcut.display}</kbd>
+            </dt>
+            <dd>{shortcut.description}</dd>
+          </div>
+        ))}
+      </dl>
+    </PanelSection>
+  );
+}
+
+/**
+ * Roboflow's "Classes / Layers" switch: the panel's category legend and the
+ * list of this item's shapes as two tabs under one "标注 N" heading.
+ */
+export function AnnotationTabs({
+  count,
+  classes,
+  layers,
+}: {
+  count: number;
+  classes: ReactNode;
+  layers: ReactNode;
+}) {
+  const [tab, setTab] = useState<"classes" | "layers">("classes");
+  return (
+    <section className="panel-section">
+      <div className="panel-section-heading annotation-heading">
+        <h2>标注</h2>
+        <span className="count-badge">{count}</span>
+      </div>
+      <div aria-label="标注视图" className="annotation-tabs" role="group">
+        <button aria-pressed={tab === "classes"} onClick={() => setTab("classes")} type="button">
+          类别
+        </button>
+        <button aria-pressed={tab === "layers"} onClick={() => setTab("layers")} type="button">
+          图层
+        </button>
+      </div>
+      {tab === "classes" ? classes : layers}
     </section>
   );
 }

@@ -4,17 +4,28 @@ import { useParams } from "wouter";
 import { projectFileUrl } from "../../api/client";
 import { LoadingState } from "../../components/AsyncState";
 import {
+  AnnotationTabs,
   CANVAS_HINTS,
   OptionList,
-  PanelSection,
   SubmitBar,
   TaskWorkspace,
 } from "../../components/workspace/TaskWorkspace";
 import { categoryColor } from "../../components/workspace/palette";
-import { DIGIT_KEYS, MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
+import { BoxIcon, HandIcon, SelectIcon } from "../../components/workspace/tool-icons";
+import { useEditHistory, useRecordChanges } from "../../components/workspace/useEditHistory";
+import {
+  DIGIT_KEYS,
+  MOD_LABEL,
+  REDO_KEYS,
+  SAVE_KEYS,
+  UNDO_KEYS,
+  useHotkeys,
+  type Hotkey,
+} from "../../components/workspace/useHotkeys";
 import { summaryProgress } from "../../project-meta";
+import { ImageStrip } from "../ImageStrip";
 import { useImageSize } from "../useImageSize";
-import { QueueFallback, itemText, summaryStrings, useTaskQueue } from "../useTaskQueue";
+import { QueueFallback, itemText, summaryStrings, useResetOnItem, useTaskQueue } from "../useTaskQueue";
 import {
   ImageCanvas,
   type ImageCanvasLayer,
@@ -41,7 +52,7 @@ const MIN_BOX_SCREEN_SIZE = 3;
 export function DetectionReviewPage() {
   const { projectId = "" } = useParams();
   const [tool, setTool] = useState<BoxToolState>(createBoxToolState());
-  const [mode, setMode] = useState<"select" | "draw">("select");
+  const [mode, setMode] = useState<"select" | "pan" | "draw">("select");
   const [category, setCurrentCategory] = useState("");
   const [previewPoint, setPreviewPoint] = useState<Point | null>(null);
   const viewportRef = useRef<Viewport>({ scale: 1, offset: { x: 0, y: 0 } });
@@ -50,12 +61,18 @@ export function DetectionReviewPage() {
     taskType: "detection",
     wrongType: "该项目不是目标检测任务。",
     onLoad: (project) => {
-      setTool(createBoxToolState());
-      setMode("select");
       setCurrentCategory(summaryStrings(project, "categories")[0] ?? "");
     },
   });
   const { ready, item, submitting, submitError } = queue;
+  const itemId = item ? itemText(item, "item_id") : "";
+  useResetOnItem(itemId, () => {
+    setTool(createBoxToolState());
+    setPreviewPoint(null);
+    if (mode === "draw") setMode("select");
+  });
+  const history = useEditHistory<readonly Box[]>();
+  const markApplied = useRecordChanges(history, tool.drag ? null : tool.boxes, itemId);
   const imagePath = item ? itemText(item, "image_path") : undefined;
   const imageUrl = imagePath ? projectFileUrl(projectId, imagePath) : undefined;
   const imageSize = useImageSize(imageUrl);
@@ -154,14 +171,24 @@ export function DetectionReviewPage() {
     }
   }
 
+  const result = imageSize
+    ? { image_size: imageSize, boxes: tool.boxes.map(({ id: _id, ...box }: Box) => box) }
+    : undefined;
+
   async function submit() {
-    if (!item || !imageSize) return;
-    const saved = await queue.submit(itemText(item, "item_id"), {
-      image_size: imageSize,
-      boxes: tool.boxes.map(({ id: _id, ...box }: Box) => box),
-    });
-    if (saved) setTool(createBoxToolState());
+    if (!item || !result) return;
+    await queue.submit(itemId, result);
   }
+
+  function restore(step: (current: readonly Box[]) => readonly Box[] | undefined) {
+    const boxes = step(tool.boxes);
+    if (!boxes) return;
+    markApplied(boxes);
+    setPreviewPoint(null);
+    setTool((current) => ({ ...current, boxes, selectedId: null, drag: null }));
+  }
+  const undo = () => restore(history.undo);
+  const redo = () => restore(history.redo);
 
   function chooseCategory(next: string) {
     setCurrentCategory(next);
@@ -174,6 +201,12 @@ export function DetectionReviewPage() {
   function toggleDraw() {
     setMode((current) => (current === "draw" ? "select" : "draw"));
     setTool((current) => ({ ...current, selectedId: null }));
+  }
+
+  function chooseMode(next: "select" | "pan" | "draw") {
+    setPreviewPoint(null);
+    setMode(next);
+    if (next === "draw") setTool((current) => ({ ...current, selectedId: null }));
   }
 
   function deleteSelected() {
@@ -190,6 +223,8 @@ export function DetectionReviewPage() {
         if (next) chooseCategory(next);
       },
     },
+    { keys: ["v"], display: "V", description: "选择 / 编辑框", run: () => chooseMode("select") },
+    { keys: ["h"], display: "H", description: "拖动画布", run: () => chooseMode("pan") },
     {
       keys: ["b"],
       display: "B",
@@ -212,6 +247,8 @@ export function DetectionReviewPage() {
         setTool((current) => ({ ...current, selectedId: null, drag: null }));
       },
     },
+    { keys: UNDO_KEYS, display: `${MOD_LABEL} + Z`, description: "撤销", run: undo },
+    { keys: REDO_KEYS, display: `${MOD_LABEL} + Shift + Z`, description: "重做", run: redo },
     {
       keys: SAVE_KEYS,
       display: `${MOD_LABEL} + Enter`,
@@ -250,85 +287,87 @@ export function DetectionReviewPage() {
       }
       hints={CANVAS_HINTS}
       hotkeys={hotkeys}
+      history={{ canUndo: history.canUndo, canRedo: history.canRedo, undo, redo }}
       panel={
         <>
-          <PanelSection title="类别">
-            <OptionList
-              counts={counts}
-              label="检测类别"
-              name="detection-category"
-              onToggle={chooseCategory}
-              options={categories}
-              selected={selectedBox ? [selectedBox.category] : [category]}
-              swatches
-            />
-            {selectedBox && <p className="panel-note">已选中一个框：选择类别会修改它的类别。</p>}
-          </PanelSection>
-          <PanelSection title="工具">
-            <button
-              aria-pressed={mode === "draw"}
-              className="secondary-action"
-              onClick={toggleDraw}
-              type="button"
-            >
-              {mode === "draw" ? "取消绘制" : "绘制新框"} <kbd aria-hidden="true">B</kbd>
-            </button>
-            <p className="panel-note">
-              {mode === "draw"
-                ? `在图像上拖动，绘制一个「${category}」框。`
+          <AnnotationTabs
+            classes={
+              <>
+                <OptionList
+                  counts={counts}
+                  label="检测类别"
+                  name="detection-category"
+                  onToggle={chooseCategory}
+                  options={categories}
+                  selected={selectedBox ? [selectedBox.category] : [category]}
+                  swatches
+                />
+                {selectedBox && <p className="panel-note">已选中一个框：选择类别会修改它的类别。</p>}
+              </>
+            }
+            count={tool.boxes.length}
+            layers={
+              tool.boxes.length === 0 ? (
+                <p className="empty-note">还没有框。没有目标时可直接保存。</p>
+              ) : (
+                <ul className="item-list">
+                  {tool.boxes.map((box, index) => (
+                    <li key={box.id}>
+                      <button
+                        aria-pressed={box.id === tool.selectedId}
+                        className="item-select"
+                        onClick={() => {
+                          setMode("select");
+                          setTool((current) => ({ ...current, selectedId: box.id }));
+                        }}
+                        type="button"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="option-swatch"
+                          style={{ background: categoryColor(categories.indexOf(box.category)) }}
+                        />
+                        <span>
+                          #{index + 1} {box.category}
+                        </span>
+                        <span className="item-meta">
+                          {Math.round(box.width)}×{Math.round(box.height)}
+                        </span>
+                      </button>
+                      <button
+                        aria-label={`删除框 #${index + 1}`}
+                        className="icon-button"
+                        onClick={() => setTool((current) => deleteBox(current, box.id))}
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            }
+          />
+          <p className="panel-note">
+            {mode === "draw"
+              ? `在图像上拖动，绘制一个「${category}」框。`
+              : mode === "pan"
+                ? "拖动平移画布；按 V 回到选择。"
                 : "点击框选中，拖动移动，拖动控制点调整大小。"}
-            </p>
-          </PanelSection>
-          <PanelSection title="标注框" aside={<span className="project-id">{tool.boxes.length} 个</span>}>
-            {tool.boxes.length === 0 ? (
-              <p className="empty-note">还没有框。没有目标时可直接保存。</p>
-            ) : (
-              <ul className="item-list">
-                {tool.boxes.map((box, index) => (
-                  <li key={box.id}>
-                    <button
-                      aria-pressed={box.id === tool.selectedId}
-                      className="item-select"
-                      onClick={() => setTool((current) => ({ ...current, selectedId: box.id }))}
-                      type="button"
-                    >
-                      <span
-                        aria-hidden="true"
-                        className="option-swatch"
-                        style={{ background: categoryColor(categories.indexOf(box.category)) }}
-                      />
-                      <span>
-                        #{index + 1} {box.category}
-                      </span>
-                      <span className="item-meta">
-                        {Math.round(box.width)}×{Math.round(box.height)}
-                      </span>
-                    </button>
-                    <button
-                      aria-label={`删除框 #${index + 1}`}
-                      className="icon-button"
-                      onClick={() => setTool((current) => deleteBox(current, box.id))}
-                      type="button"
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </PanelSection>
+          </p>
         </>
       }
       progress={summaryProgress(ready.project.summary, ready.queue.total)}
       projectId={projectId}
       projectName={ready.project.name}
+      rawData={result}
       remaining={ready.queue.total}
       stage={
         imageSize && imageUrl ? (
           <ImageCanvas
             alt={imagePath ?? ""}
             imageSize={imageSize}
-            interactionMode="tool"
+            interactionMode={mode === "pan" ? "pan" : "tool"}
             layers={[layer]}
             onPointerEvent={handlePointer}
             onViewportChange={(next) => {
@@ -340,7 +379,15 @@ export function DetectionReviewPage() {
           <LoadingState>正在读取图像尺寸…</LoadingState>
         )
       }
+      strip={<ImageStrip dirty={history.canUndo} projectId={projectId} queue={queue} />}
       title="目标检测"
+      tools={[
+        [
+          { id: "select", label: "选择", icon: <SelectIcon />, shortcut: "V", active: mode === "select", onSelect: () => chooseMode("select") },
+          { id: "pan", label: "拖动画布", icon: <HandIcon />, shortcut: "H", active: mode === "pan", onSelect: () => chooseMode("pan") },
+        ],
+        [{ id: "box", label: "矩形框", icon: <BoxIcon />, shortcut: "B", active: mode === "draw", onSelect: () => chooseMode("draw") }],
+      ]}
     />
   );
 }

@@ -20,8 +20,9 @@ import {
 import { categoryColor } from "../../components/workspace/palette";
 import { DIGIT_KEYS, MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
 import { summaryProgress } from "../../project-meta";
+import { ImageStrip } from "../ImageStrip";
 import { TextDocument } from "../ItemStage";
-import { QueueFallback, itemText, summaryStrings, useTaskQueue } from "../useTaskQueue";
+import { QueueFallback, itemText, summaryStrings, useResetOnItem, useTaskQueue } from "../useTaskQueue";
 import "./text-span.css";
 
 const MAX_STACKED_MARKS = 4;
@@ -64,12 +65,14 @@ export function TextSpanReviewPage() {
     taskType: "text_span",
     wrongType: "该项目不是文本片段标注任务。",
     onLoad: (project) => {
-      setSpans([]);
-      setSelected(null);
       setLabel(summaryStrings(project, "labels")[0] ?? "");
     },
   });
   const { ready, item, submitting, submitError } = queue;
+  useResetOnItem(item ? itemText(item, "item_id") : "", () => {
+    setSpans([]);
+    setSelected(null);
+  });
   const labels = useMemo(() => (ready ? summaryStrings(ready.project, "labels") : []), [ready]);
   const text = item && typeof item.text === "string" ? item.text : null;
   const textError = item?.text_error == null ? null : String(item.text_error);
@@ -250,7 +253,9 @@ export function TextSpanReviewPage() {
       progress={summaryProgress(ready.project.summary, ready.queue.total)}
       projectId={projectId}
       projectName={ready.project.name}
+      rawData={{ spans }}
       remaining={ready.queue.total}
+      strip={<ImageStrip dirty={spans.length > 0} projectId={projectId} queue={queue} title="文档" />}
       stage={
         <TextDocument error={textError} path={path} text={text}>
           {text === "" ? (

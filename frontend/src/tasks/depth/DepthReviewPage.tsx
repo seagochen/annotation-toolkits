@@ -7,11 +7,19 @@ import {
   CANVAS_HINTS,
   PanelSection,
   RangeField,
-  Segmented,
   SubmitBar,
   TaskWorkspace,
 } from "../../components/workspace/TaskWorkspace";
-import { MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
+import { HandIcon, LowerIcon, RaiseIcon } from "../../components/workspace/tool-icons";
+import { useEditHistory } from "../../components/workspace/useEditHistory";
+import {
+  MOD_LABEL,
+  REDO_KEYS,
+  SAVE_KEYS,
+  UNDO_KEYS,
+  useHotkeys,
+  type Hotkey,
+} from "../../components/workspace/useHotkeys";
 import { summaryProgress } from "../../project-meta";
 import {
   ImageCanvas,
@@ -22,17 +30,21 @@ import {
   type Viewport,
 } from "../../components/image-canvas";
 import {
+  cloneRasterBuffer,
   createRasterBuffer,
   loadFromImageElement,
   toBase64,
   type RasterBuffer,
 } from "../../components/image-canvas/raster-buffer";
+import { ImageStrip } from "../ImageStrip";
 import { useImageSize } from "../useImageSize";
-import { QueueFallback, itemText, useTaskQueue, type QueueItem } from "../useTaskQueue";
+import { QueueFallback, itemText, useResetOnItem, useTaskQueue, type QueueItem } from "../useTaskQueue";
 
 const BLANK_DEPTH = 128;
 const MIN_RADIUS = 2;
 const MAX_RADIUS = 150;
+// Each undo step keeps a whole copy of the depth map.
+const HISTORY_LIMIT = 20;
 
 function itemBaselinePath(item: QueueItem): string | null {
   const value = item.baseline_path;
@@ -41,7 +53,7 @@ function itemBaselinePath(item: QueueItem): string | null {
 
 export function DepthReviewPage() {
   const { projectId = "" } = useParams();
-  const [direction, setDirection] = useState<"raise" | "lower">("raise");
+  const [tool, setTool] = useState<"pan" | "raise" | "lower">("raise");
   const [strength, setStrength] = useState(16);
   const [radius, setRadius] = useState(24);
   const [raster, setRaster] = useState<RasterBuffer | null>(null);
@@ -51,9 +63,13 @@ export function DepthReviewPage() {
   const queue = useTaskQueue(projectId, {
     taskType: "depth",
     wrongType: "该项目不是深度图标注任务。",
-    onLoad: () => setRaster(null),
   });
   const { ready, item, submitting, submitError } = queue;
+  const history = useEditHistory<RasterBuffer>(HISTORY_LIMIT);
+  useResetOnItem(item ? itemText(item, "item_id") : "", () => {
+    setRaster(null);
+    history.clear();
+  });
   const imagePath = item ? itemText(item, "image_path") : undefined;
   const imageUrl = imagePath ? projectFileUrl(projectId, imagePath) : undefined;
   const baselinePath = item ? itemBaselinePath(item) : null;
@@ -80,7 +96,7 @@ export function DepthReviewPage() {
     };
   }, [baselinePath, imageSize, projectId, raster]);
 
-  const sign = direction === "raise" ? 1 : -1;
+  const sign = tool === "lower" ? -1 : 1;
 
   const layer: ImageCanvasLayer = useMemo(
     () => ({
@@ -96,32 +112,43 @@ export function DepthReviewPage() {
 
   function handlePointer(event: ImageCanvasPointerEvent) {
     if (!raster) return;
+    if (event.phase === "down") history.record(cloneRasterBuffer(raster));
     paint(event, radius, (value) => value + sign * strength);
   }
 
+  function restore(step: (current: RasterBuffer) => RasterBuffer | undefined) {
+    if (!raster) return;
+    const previous = step(cloneRasterBuffer(raster));
+    if (previous) setRaster(previous);
+  }
+  const undo = () => restore(history.undo);
+  const redo = () => restore(history.redo);
+
   async function submit() {
     if (!item || !raster) return;
-    const saved = await queue.submit(itemText(item, "item_id"), {
+    await queue.submit(itemText(item, "item_id"), {
       image_size: { width: raster.width, height: raster.height },
       pixels: toBase64(raster),
     });
-    if (saved) setRaster(null);
   }
 
   const resize = (delta: number) =>
     setRadius((current) => Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, current + delta)));
 
   const hotkeys: Hotkey[] = [
-    { keys: ["1"], display: "1", description: "提高深度", run: () => setDirection("raise") },
-    { keys: ["2"], display: "2", description: "降低深度", run: () => setDirection("lower") },
+    { keys: ["h"], display: "H", description: "拖动画布", run: () => setTool("pan") },
+    { keys: ["1"], display: "1", description: "提高深度", run: () => setTool("raise") },
+    { keys: ["2"], display: "2", description: "降低深度", run: () => setTool("lower") },
     {
       keys: ["x"],
       display: "X",
       description: "切换提高 / 降低",
-      run: () => setDirection((current) => (current === "raise" ? "lower" : "raise")),
+      run: () => setTool((current) => (current === "raise" ? "lower" : "raise")),
     },
     { keys: ["["], display: "[", description: "缩小画笔", repeat: true, run: () => resize(-4) },
     { keys: ["]"], display: "]", description: "放大画笔", repeat: true, run: () => resize(4) },
+    { keys: UNDO_KEYS, display: `${MOD_LABEL} + Z`, description: "撤销", run: undo },
+    { keys: REDO_KEYS, display: `${MOD_LABEL} + Shift + Z`, description: "重做", run: redo },
     {
       keys: SAVE_KEYS,
       display: `${MOD_LABEL} + Enter`,
@@ -156,35 +183,18 @@ export function DepthReviewPage() {
       }
       hints={CANVAS_HINTS}
       hotkeys={hotkeys}
+      history={{ canUndo: history.canUndo, canRedo: history.canRedo, undo, redo }}
       panel={
-        <>
+        <PanelSection title="深度图">
           {!baselinePath && (
             <p className="submit-hint">未找到基线深度图，已从中灰度（128）开始编辑。</p>
           )}
-          <PanelSection title="调整方向">
-            <Segmented
-              label="调整方向"
-              onChange={setDirection}
-              options={[
-                { value: "raise", label: "提高深度", key: "1" },
-                { value: "lower", label: "降低深度", key: "2" },
-              ]}
-              value={direction}
-            />
-          </PanelSection>
-          <PanelSection title="画笔">
-            <RangeField
-              label="画笔半径"
-              max={MAX_RADIUS}
-              min={MIN_RADIUS}
-              onChange={setRadius}
-              unit="px"
-              value={radius}
-            />
-            <RangeField label="调整强度" max={64} min={1} onChange={setStrength} value={strength} />
-            <p className="panel-note">深度图以正片叠底叠加在原图上：越暗表示数值越小。</p>
-          </PanelSection>
-        </>
+          <p className="panel-note">
+            深度图以正片叠底叠加在原图上：越暗表示数值越小。用右侧工具栏的“提高 / 降低”画笔在图上涂抹，
+            画笔半径与强度在工具旁调整。
+          </p>
+          <p className="panel-note">当前：{tool === "pan" ? "拖动画布" : tool === "raise" ? "提高深度" : "降低深度"}</p>
+        </PanelSection>
       }
       progress={summaryProgress(ready.project.summary, ready.queue.total)}
       projectId={projectId}
@@ -195,7 +205,7 @@ export function DepthReviewPage() {
           <ImageCanvas
             alt={imagePath ?? ""}
             imageSize={imageSize}
-            interactionMode="tool"
+            interactionMode={tool === "pan" ? "pan" : "tool"}
             layers={[layer]}
             onPointerEvent={handlePointer}
             onViewportChange={(next) => {
@@ -207,7 +217,30 @@ export function DepthReviewPage() {
           <LoadingState>正在读取基线深度图…</LoadingState>
         )
       }
+      strip={<ImageStrip dirty={history.canUndo} projectId={projectId} queue={queue} />}
       title="深度图标注"
+      toolOptions={
+        tool === "pan" ? undefined : (
+          <>
+            <RangeField
+              label="画笔半径"
+              max={MAX_RADIUS}
+              min={MIN_RADIUS}
+              onChange={setRadius}
+              unit="px"
+              value={radius}
+            />
+            <RangeField label="调整强度" max={64} min={1} onChange={setStrength} value={strength} />
+          </>
+        )
+      }
+      tools={[
+        [{ id: "pan", label: "拖动画布", icon: <HandIcon />, shortcut: "H", active: tool === "pan", onSelect: () => setTool("pan") }],
+        [
+          { id: "raise", label: "提高深度", icon: <RaiseIcon />, shortcut: "1", active: tool === "raise", onSelect: () => setTool("raise") },
+          { id: "lower", label: "降低深度", icon: <LowerIcon />, shortcut: "2", active: tool === "lower", onSelect: () => setTool("lower") },
+        ],
+      ]}
     />
   );
 }

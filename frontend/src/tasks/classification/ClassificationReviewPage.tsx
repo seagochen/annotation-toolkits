@@ -9,8 +9,9 @@ import {
 } from "../../components/workspace/TaskWorkspace";
 import { DIGIT_KEYS, MOD_LABEL, SAVE_KEYS, useHotkeys, type Hotkey } from "../../components/workspace/useHotkeys";
 import { summaryProgress } from "../../project-meta";
+import { ImageStrip } from "../ImageStrip";
 import { ItemStage, isTextItem } from "../ItemStage";
-import { QueueFallback, itemText, summaryStrings, useTaskQueue } from "../useTaskQueue";
+import { QueueFallback, itemText, summaryStrings, useResetOnItem, useTaskQueue } from "../useTaskQueue";
 
 export function ClassificationReviewPage() {
   const { projectId = "" } = useParams();
@@ -18,9 +19,9 @@ export function ClassificationReviewPage() {
   const queue = useTaskQueue(projectId, {
     taskType: "classification",
     wrongType: "该项目不是分类任务。",
-    onLoad: () => setSelected([]),
   });
   const { ready, item, submitting, submitError } = queue;
+  useResetOnItem(item ? itemText(item, "item_id") : "", () => setSelected([]));
   const labels = useMemo(() => (ready ? summaryStrings(ready.project, "labels") : []), [ready]);
   const mode = ready ? String(ready.project.summary.mode) : "single";
 
@@ -36,7 +37,7 @@ export function ClassificationReviewPage() {
 
   async function submit() {
     if (!item || !selected.length) return;
-    if (await queue.submit(itemText(item, "item_id"), { labels: selected })) setSelected([]);
+    await queue.submit(itemText(item, "item_id"), { labels: selected });
   }
 
   const hotkeys: Hotkey[] = [
@@ -100,8 +101,15 @@ export function ClassificationReviewPage() {
       progress={summaryProgress(ready.project.summary, ready.queue.total)}
       projectId={projectId}
       projectName={ready.project.name}
+      rawData={{ labels: selected }}
       remaining={ready.queue.total}
       stage={<ItemStage item={item} projectId={projectId} />}
+      strip={<ImageStrip
+          dirty={selected.length > 0}
+          projectId={projectId}
+          queue={queue}
+          title={isTextItem(item) ? "文档" : "图像"}
+        />}
       title={isTextItem(item) ? "文本分类" : "图像分类"}
       unit={isTextItem(item) ? "篇" : "张"}
     />
