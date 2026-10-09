@@ -14,7 +14,7 @@ from fastapi import HTTPException, Request
 from PIL import Image
 from starlette.responses import JSONResponse
 
-from .img_annotation.standard.polygon_task import PolygonStore, _polygons
+from .img_annotation.standard.polygon_task import PolygonStore, _polygons, _shapes
 from .task_types import Submission, TaskConflictError, TaskOperationError
 from .project_registry import ProjectRegistryError
 
@@ -34,6 +34,9 @@ def job_database(root: Path):
             source_sha256 TEXT NOT NULL, source_revision INTEGER NOT NULL, image_size_json TEXT NOT NULL,
             source_polygons_json TEXT NOT NULL, run_id TEXT, status TEXT NOT NULL, result_json TEXT, created_at TEXT NOT NULL
         )""")
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)")}
+        if "source_shapes_json" not in columns:
+            connection.execute("ALTER TABLE jobs ADD COLUMN source_shapes_json TEXT")
         yield connection
         connection.commit()
     finally:
@@ -125,6 +128,9 @@ class HostedAi:
         with native.lock:
             current = native._read()["items"].get(body["itemId"])
             revision = 0 if current is None else current["revision"]
+            if body["itemId"] in native._read_drafts():
+                raise HTTPException(409, "Submit or discard the annotation draft before requesting AI")
+            source_shapes = _shapes(current or {"polygons": []})
         with job_database(workspace.root) as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute("SELECT * FROM jobs WHERE id=?", (body["id"],)).fetchone()
@@ -133,9 +139,13 @@ class HostedAi:
                     raise HTTPException(409, "AI job ID already describes another input")
                 if existing["run_id"] or existing["status"] != "submitting": return _view(existing)
             else:
-                connection.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,NULL,'submitting',NULL,?)",
+                connection.execute("""INSERT INTO jobs
+                    (id,project_id,request_json,source_sha256,source_revision,image_size_json,
+                     source_polygons_json,created_at,source_shapes_json,status)
+                    VALUES (?,?,?,?,?,?,?,?,?,'submitting')""",
                     (body["id"], entry.id, payload, checksum, revision, json.dumps(size),
-                     json.dumps([] if current is None else current["polygons"]), datetime.now(timezone.utc).isoformat()))
+                     json.dumps(source_shapes["polygons"]), datetime.now(timezone.utc).isoformat(),
+                     json.dumps(source_shapes)))
         # The stable id survives a lost reply or restart. The platform/backend
         # idempotency contract resolves retries without charging another run.
         key = hashlib.sha256((owner["userId"] + ":" + entry.id + ":" + body["id"]).encode()).hexdigest()
@@ -212,10 +222,15 @@ class HostedAi:
         if hashlib.sha256((entry.project.root / relative).read_bytes()).hexdigest() != row["source_sha256"]:
             raise HTTPException(409, "Source image changed")
         result = json.loads(row["result_json"])
+        source_shapes = (json.loads(row["source_shapes_json"]) if row["source_shapes_json"] is not None
+            else _shapes({"polygons": json.loads(row["source_polygons_json"])}))
         try:
-            native.submit(Submission(request["itemId"], {"base_revision": row["source_revision"],
-                "image_size": json.loads(row["image_size_json"]),
-                "polygons": json.loads(row["source_polygons_json"]) + result["polygons"]}))
+            with native.lock:
+                if request["itemId"] in native._read_drafts():
+                    raise HTTPException(409, "Submit or discard the annotation draft before applying AI")
+                native.submit(Submission(request["itemId"], {"base_revision": row["source_revision"],
+                    "image_size": json.loads(row["image_size_json"]), **source_shapes,
+                    "polygons": source_shapes["polygons"] + result["polygons"]}))
         except TaskConflictError as error: raise HTTPException(409, "Annotation changed; review the current image before applying AI") from error
         except TaskOperationError as error: raise HTTPException(422, str(error)) from error
         with job_database(workspace.root) as connection:

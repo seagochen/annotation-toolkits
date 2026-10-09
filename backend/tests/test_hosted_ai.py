@@ -123,14 +123,17 @@ def test_stale_manual_annotation_cannot_be_overwritten(service):
         assert queue["items"][0]["polygons"] == [] and queue["items"][0]["revision"] == 1
 
 
-def test_apply_preserves_manual_polygons_and_recovers_interrupted_status_write(service):
+def test_apply_preserves_all_manual_shapes_and_recovers_interrupted_status_write(service):
     from annotation_platform.hosted_ai import job_database
     app, _, workspace, entry, _ = service
     base = "/api/projects/" + entry.id
     manual = {"category": "cat", "points": [[6, 1], [9, 1], [9, 5]]}
+    box = {"category": "cat", "x": 2, "y": 2, "width": 3, "height": 2}
+    point = {"category": "cat", "x": 7, "y": 6}
     with TestClient(app, base_url=ORIGIN) as client:
         assert client.post(base + "/annotations", headers=HEADERS, json={"item_id": item_id("sample.png"),
-            "result": {"base_revision": 0, "image_size": {"width": 10, "height": 8}, "polygons": [manual]}}).status_code == 200
+            "result": {"base_revision": 0, "image_size": {"width": 10, "height": 8},
+                       "polygons": [manual], "boxes": [box], "points": [point]}}).status_code == 200
         assert client.post(base + "/ai-jobs", headers=HEADERS, json=payload()).status_code == 200
         assert client.post(base + "/ai-jobs/stable-job-id/refresh", headers=HEADERS, json={}).status_code == 200
         assert client.post(base + "/ai-jobs/stable-job-id/apply", headers=HEADERS, json={}).status_code == 200
@@ -141,6 +144,28 @@ def test_apply_preserves_manual_polygons_and_recovers_interrupted_status_write(s
         queued = client.get(base + "/queue", headers=HEADERS).json()["items"][0]
         assert queued["revision"] == 2 and len(queued["polygons"]) == 2
         assert queued["polygons"][0] == manual
+        assert queued["boxes"] == [box] and queued["points"] == [point]
+
+
+@pytest.mark.parametrize("before_submission", [True, False])
+def test_unsubmitted_drafts_block_ai_without_losing_edits(service, before_submission):
+    app, state, _, entry, _ = service
+    base = "/api/projects/" + entry.id
+    draft = {"base_revision": 0, "image_size": {"width": 10, "height": 8},
+             "polygons": [], "boxes": [{"category": "cat", "x": 2, "y": 2, "width": 3, "height": 2}]}
+    with TestClient(app, base_url=ORIGIN) as client:
+        if not before_submission:
+            assert client.post(base + "/ai-jobs", headers=HEADERS, json=payload()).status_code == 200
+            assert client.post(base + "/ai-jobs/stable-job-id/refresh", headers=HEADERS, json={}).status_code == 200
+        assert client.put(base + "/drafts", headers=HEADERS,
+                          json={"item_id": item_id("sample.png"), "result": draft}).status_code == 200
+        if before_submission:
+            assert client.post(base + "/ai-jobs", headers=HEADERS, json=payload()).status_code == 409
+            assert not state["submitted"]
+        else:
+            assert client.post(base + "/ai-jobs/stable-job-id/apply", headers=HEADERS, json={}).status_code == 409
+        queued = client.get(base + "/queue", headers=HEADERS).json()["items"][0]
+        assert queued["draft"] and queued["revision"] == 0 and queued["boxes"] == draft["boxes"]
 
 
 def test_invalid_engine_value_is_rejected_without_creating_a_job(service):
@@ -149,3 +174,18 @@ def test_invalid_engine_value_is_rejected_without_creating_a_job(service):
     with TestClient(app, base_url=ORIGIN) as client:
         assert client.post(base, headers=HEADERS, json={**payload(), "engine": []}).status_code == 422
         assert client.get(base, headers=HEADERS).json()["items"] == [] and not state["submitted"]
+
+
+def test_polygon_only_jobs_upgrade_and_resume_from_the_previous_schema(service):
+    from annotation_platform.hosted_ai import job_database
+    app, _, workspace, entry, _ = service
+    base = "/api/projects/" + entry.id + "/ai-jobs"
+    with TestClient(app, base_url=ORIGIN) as client:
+        assert client.post(base, headers=HEADERS, json=payload()).status_code == 200
+        assert client.post(base + "/stable-job-id/refresh", headers=HEADERS, json={}).status_code == 200
+        with job_database(workspace.root) as connection:
+            connection.execute("ALTER TABLE jobs DROP COLUMN source_shapes_json")
+        assert client.post(base + "/stable-job-id/apply", headers=HEADERS, json={}).json()["status"] == "applied"
+        queued = client.get("/api/projects/" + entry.id + "/queue", headers=HEADERS).json()["items"][0]
+        assert queued["revision"] == 1 and len(queued["polygons"]) == 1
+        assert queued["boxes"] == [] and queued["points"] == []
