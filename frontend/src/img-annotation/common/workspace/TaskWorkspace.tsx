@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "wouter";
 
 import type { Progress } from "../../../project-meta";
@@ -59,6 +59,7 @@ export function TaskWorkspace({
   tools,
   history,
   toolOptions,
+  stageAction,
   strip,
   rawData,
 }: {
@@ -67,11 +68,13 @@ export function TaskWorkspace({
   title: string;
   fileName?: string;
   progress: Progress | null;
-  remaining: number;
+  /** Items left, shown beside the progress; omitted, only "已完成 N / M" is shown. */
+  remaining?: number;
   unit?: string;
   stage: ReactNode;
   panel: ReactNode;
-  footer: ReactNode;
+  /** Below the progress: the save bar, or a save error of an autosaving page. */
+  footer?: ReactNode;
   hotkeys?: readonly Hotkey[];
   hints?: readonly ShortcutHint[];
   /** Canvas tools, in groups separated by a divider. */
@@ -79,6 +82,8 @@ export function TaskWorkspace({
   history?: HistoryControls;
   /** Settings of the active tool (brush size…), floated beside the tool rail. */
   toolOptions?: ReactNode;
+  /** Floated at the stage's bottom right (the zoom bar is bottom left): the submit button. */
+  stageAction?: ReactNode;
   /** The image list column (see img-annotation/common/ImageStrip). */
   strip?: ReactNode;
   /** The result as it would be saved, shown in the "原始数据" tab. */
@@ -143,7 +148,7 @@ export function TaskWorkspace({
             </div>
             <div className="workspace-panel-footer">
               <div className="workspace-progress">
-                {progress && (
+                {progress && remaining !== undefined && (
                   <div
                     aria-label="标注进度"
                     aria-valuemax={progress.total}
@@ -161,10 +166,12 @@ export function TaskWorkspace({
                       已完成 {progress.done} / {progress.total}
                     </span>
                   )}
-                  <div className="queue-count">
-                    <strong>{remaining}</strong>
-                    <span>{unit}待处理</span>
-                  </div>
+                  {remaining !== undefined && (
+                    <div className="queue-count">
+                      <strong>{remaining}</strong>
+                      <span>{unit}待处理</span>
+                    </div>
+                  )}
                 </div>
               </div>
               {footer}
@@ -219,6 +226,7 @@ export function TaskWorkspace({
             )}
           </div>
         )}
+        {stageAction && <div className="stage-action">{stageAction}</div>}
         {toolOptions && (
           <div aria-label="工具选项" className={hasRail ? "tool-options" : "tool-options no-rail"} role="group">
             {toolOptions}
@@ -248,34 +256,60 @@ function ShortcutList({ shortcuts }: { shortcuts: readonly ShortcutHint[] }) {
 }
 
 /**
- * Roboflow's "Classes / Layers" switch: the panel's category legend and the
- * list of this item's shapes as two tabs under one "标注 N" heading.
+ * Roboflow's "Classes" list with this item's count per category, under an
+ * "标注 N" heading. A category row is the category new shapes get
+ * (`current`, shown with the side bar) and is pressed while it is `focused`,
+ * which the canvas uses to show that category's vertices and handles; what a
+ * click does (focus, or relabel the selected shape) is the page's `onPick`.
  */
-export function AnnotationTabs({
-  count,
-  classes,
-  layers,
+export function ClassLayers({
+  label,
+  categories,
+  current,
+  focused,
+  counts,
+  onPick,
 }: {
-  count: number;
-  classes: ReactNode;
-  layers: ReactNode;
+  label: string;
+  categories: readonly string[];
+  current: string;
+  focused: string | null;
+  counts: Readonly<Record<string, number>>;
+  onPick: (category: string) => void;
 }) {
-  const [tab, setTab] = useState<"classes" | "layers">("classes");
+  // Shapes with a category the project does not declare still get a row.
+  const groups = [...categories, ...Object.keys(counts).filter((category) => !categories.includes(category))];
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
   return (
     <section className="panel-section">
       <div className="panel-section-heading annotation-heading">
         <h2>标注</h2>
-        <span className="count-badge">{count}</span>
+        <span className="count-badge">{total}</span>
       </div>
-      <div aria-label="标注视图" className="annotation-tabs" role="group">
-        <button aria-pressed={tab === "classes"} onClick={() => setTab("classes")} type="button">
-          类别
-        </button>
-        <button aria-pressed={tab === "layers"} onClick={() => setTab("layers")} type="button">
-          图层
-        </button>
+      <div aria-label={label} className="class-layers" role="group">
+        {groups.map((category, index) => {
+          const color = categoryColor(categories.indexOf(category));
+          return (
+            <button
+              aria-pressed={focused === category}
+              className={category === current ? "class-row current" : "class-row"}
+              key={category}
+              onClick={() => onPick(category)}
+              style={{ "--class-color": color } as CSSProperties}
+              type="button"
+            >
+              <span aria-hidden="true" className="option-swatch" style={{ background: color }} />
+              <span className="option-name">{category}</span>
+              {counts[category] ? (
+                <span aria-hidden="true" className="option-count" title="本图中的数量">
+                  ×{counts[category]}
+                </span>
+              ) : null}
+              {index < 9 && categories.includes(category) && <kbd aria-hidden="true">{index + 1}</kbd>}
+            </button>
+          );
+        })}
       </div>
-      {tab === "classes" ? classes : layers}
     </section>
   );
 }

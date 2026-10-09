@@ -93,7 +93,7 @@ export function SegmentationReviewPage() {
   });
   const { ready, item, submitting, submitError } = queue;
   const history = useEditHistory<RasterBuffer>(HISTORY_LIMIT);
-  useResetOnItem(item ? itemText(item, "item_id") : "", () => {
+  useResetOnItem(queue, (shown) => itemText(shown, "item_id"), () => {
     setRaster(null);
     setPolygonTool((current) => createPolygonToolState([], current.category));
     history.clear();

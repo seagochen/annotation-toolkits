@@ -29,14 +29,15 @@ function NotFoundPage() {
 }
 
 export function App() {
-  // Annotation pages are full-bleed tools; every other page is a padded
-  // document in the work area.
+  // Annotation pages are full-bleed tools without the app navigation (their
+  // workspace header links back to the project); every other page is a
+  // padded document beside the navigation.
   const [location] = useLocation();
   const annotating = ANNOTATION_PATH.test(location);
   return (
     <ProjectsProvider>
-      <div className="app-shell">
-        <SideNav compact={annotating} />
+      <div className={annotating ? "app-shell annotating" : "app-shell"}>
+        {!annotating && <SideNav />}
         <main className={annotating ? "main-wide" : undefined}>
           <Switch>
             <Route path="/" component={HomePage} />

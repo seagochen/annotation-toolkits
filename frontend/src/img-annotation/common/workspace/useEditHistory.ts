@@ -79,9 +79,16 @@ export function useEditHistory<T>(limit = 50): EditHistory<T> {
  * stack. Pass null while an edit is in progress (a drag) so the whole drag
  * is one step. Values restored by undo/redo are not recorded again as long
  * as the page passes `applied` the value it restored before setting it.
- * `resetKey` starts a fresh history (a new item).
+ * `resetKey` starts a fresh history (a new item). `equals` decides when two
+ * values are the same document (default: identity); a page whose document is
+ * built from several lists compares those lists instead.
  */
-export function useRecordChanges<T>(history: EditHistory<T>, value: T | null, resetKey: string) {
+export function useRecordChanges<T>(
+  history: EditHistory<T>,
+  value: T | null,
+  resetKey: string,
+  equals: (a: T, b: T) => boolean = Object.is,
+) {
   const settled = useRef<{ key: string; value: T } | null>(null);
   const skip = useRef<T | null>(null);
   const { record, clear } = history;
@@ -94,12 +101,13 @@ export function useRecordChanges<T>(history: EditHistory<T>, value: T | null, re
       clear();
       return;
     }
-    if (previous.value === value) return;
-    if (skip.current === value) {
+    if (equals(previous.value, value)) return;
+    if (skip.current !== null && equals(skip.current, value)) {
       skip.current = null;
       return;
     }
     record(previous.value);
+    // `equals` is meant to be a module-level function, so it is not a dependency.
   }, [clear, record, resetKey, value]);
 
   return useCallback((applied: T) => {

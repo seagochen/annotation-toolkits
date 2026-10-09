@@ -20,7 +20,7 @@ export function CaptionReviewPage() {
     wrongType: "该项目不是描述 / 文本生成任务。",
   });
   const { ready, item, submitting, submitError } = queue;
-  useResetOnItem(item ? itemText(item, "item_id") : "", () => setCaption(""));
+  useResetOnItem(queue, (shown) => itemText(shown, "item_id"), () => setCaption(""));
   const trimmed = caption.trim();
 
   async function submit() {

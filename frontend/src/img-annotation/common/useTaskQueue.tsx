@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from "rea
 import {
   getProject,
   getQueue,
+  saveDraft as putDraft,
   submitAnnotation,
   type ProjectDetail,
   type QueueResponse,
@@ -66,11 +67,50 @@ export function useTaskQueue(
   // Items saved during this visit, so the image list can tick them off
   // without re-reading every page of it after each save.
   const [savedIds, setSavedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const savedIdsRef = useRef(savedIds);
+  const markSaved = useCallback((itemId: string) => {
+    if (savedIdsRef.current.has(itemId)) return;
+    savedIdsRef.current = new Set(savedIdsRef.current).add(itemId);
+    setSavedIds(savedIdsRef.current);
+  }, []);
+  // Whether an item has an unsubmitted draft, as far as this visit has seen
+  // (overrides the image list's `draft` flag).
+  const [draftIds, setDraftIds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const markDraft = useCallback((itemId: string, draft: boolean) => {
+    setDraftIds((current) => (current.get(itemId) === draft ? current : new Map(current).set(itemId, draft)));
+  }, []);
+  // The page's `useResetOnItem` handler. Every write of a new queue page calls
+  // it in the same batch, so the page's reset is an ordinary state update of
+  // that batch rather than an update during render (see `useResetOnItem`).
+  const itemListener = useRef<((item: QueueItem | undefined, project: ProjectDetail | undefined) => void) | null>(
+    null,
+  );
+  // An autosaving page's flush: run before showing another item; false keeps
+  // the current one (its edits could not be saved).
+  const leaveGuard = useRef<(() => Promise<boolean>) | null>(null);
+  const shownState = useRef(state);
+  shownState.current = state;
+
+  /** Replace the queue state and let the page reset for the item it now shows. */
+  const show = useCallback((next: QueueState) => {
+    shownState.current = next;
+    setState(next);
+    if (next.kind === "ready") itemListener.current?.(next.queue.items[0], next.project);
+    else itemListener.current?.(undefined, undefined);
+  }, []);
+  /** Show another queue page of the already loaded project. */
+  const showQueue = useCallback(
+    (queue: QueueResponse) => {
+      const current = shownState.current;
+      if (current.kind === "ready") show({ ...current, queue });
+    },
+    [show],
+  );
 
   const reload = useCallback(async () => {
     if (busy.current) return;
     const version = ++requestVersion.current;
-    setState({ kind: "loading" });
+    show({ kind: "loading" });
     setSubmitError("");
     try {
       const current = viewRef.current;
@@ -80,16 +120,16 @@ export function useTaskQueue(
       ]);
       if (version !== requestVersion.current) return;
       if (project.task_type !== taskType) {
-        setState({ kind: "error", message: wrongType });
+        show({ kind: "error", message: wrongType });
         return;
       }
       onLoad.current?.(project);
-      setState({ kind: "ready", project, queue });
+      show({ kind: "ready", project, queue });
     } catch (error) {
       if (version !== requestVersion.current) return;
-      setState({ kind: "error", message: message(error) });
+      show({ kind: "error", message: message(error) });
     }
-  }, [projectId, taskType, wrongType]);
+  }, [projectId, show, taskType, wrongType]);
 
   useEffect(() => {
     void reload();
@@ -107,8 +147,10 @@ export function useTaskQueue(
       setSubmitting(true);
       setSubmitError("");
       try {
-        await submitAnnotation(projectId, itemId, result);
-        setSavedIds((current) => new Set(current).add(itemId));
+        const response = await submitAnnotation(projectId, itemId, result);
+        markSaved(itemId);
+        markDraft(itemId, false);
+        const { total, pending } = response.status.details as Record<string, unknown>;
         let next = viewRef.current;
         let queue = await getQueue(projectId, next.status, next.offset);
         if (!queue.items.length && queue.total > 0 && next.offset > 0) {
@@ -119,7 +161,15 @@ export function useTaskQueue(
           setView(next);
           viewRef.current = next;
         }
-        setState((current) => (current.kind === "ready" ? { ...current, queue } : current));
+        const shown = shownState.current;
+        if (shown.kind === "ready" && typeof total === "number" && typeof pending === "number") {
+          // The project's counts follow the server (the progress shown beside the item).
+          shownState.current = {
+            ...shown,
+            project: { ...shown.project, summary: { ...shown.project.summary, total, pending } },
+          };
+        }
+        showQueue(queue);
         return true;
       } catch (error) {
         setSubmitError(message(error));
@@ -129,17 +179,34 @@ export function useTaskQueue(
         setSubmitting(false);
       }
     },
-    [projectId],
+    [markDraft, markSaved, projectId, showQueue],
+  );
+
+  /**
+   * Autosave the item's working copy (task types that keep drafts): not a
+   * submission, so the item stays shown and pending. Rejects when it fails.
+   */
+  const saveDraft = useCallback(
+    async (itemId: string, result: Record<string, unknown>): Promise<void> => {
+      const response = await putDraft(projectId, itemId, result);
+      markDraft(itemId, response.draft);
+    },
+    [markDraft, projectId],
   );
 
   /**
    * Show another queue page without reloading the project: the pending
    * queue, or the `offset`-th annotated item (for task types whose results
-   * stay editable).
+   * stay editable). `next` may be a function of the saved item ids, resolved
+   * after the page's `leaveGuard` ran: saving the item being left moves the
+   * pending offsets of the items after it.
    */
   const browse = useCallback(
-    async (next: QueueView): Promise<void> => {
+    async (target: QueueView | ((saved: ReadonlySet<string>) => QueueView | null)): Promise<void> => {
       if (busy.current) return;
+      if (leaveGuard.current && !(await leaveGuard.current())) return;
+      const next = typeof target === "function" ? target(savedIdsRef.current) : target;
+      if (!next) return;
       const version = ++requestVersion.current;
       setSubmitError("");
       try {
@@ -147,13 +214,13 @@ export function useTaskQueue(
         if (version !== requestVersion.current) return;
         setView(next);
         viewRef.current = next;
-        setState((current) => (current.kind === "ready" ? { ...current, queue } : current));
+        showQueue(queue);
       } catch (error) {
         if (version !== requestVersion.current) return;
-        setState({ kind: "error", message: message(error) });
+        show({ kind: "error", message: message(error) });
       }
     },
-    [projectId],
+    [projectId, show, showQueue],
   );
 
   const ready: ReadyQueue | null = state.kind === "ready" ? state : null;
@@ -167,7 +234,11 @@ export function useTaskQueue(
     submitError,
     view,
     browse,
+    saveDraft,
     savedIds,
+    draftIds,
+    itemListener,
+    leaveGuard,
   };
 }
 
@@ -198,15 +269,32 @@ export function QueueFallback({
 }
 
 /**
- * Run `reset` while rendering whenever `key` (the shown item) changes, so the
- * first render of a new item already has fresh page state — an effect would
- * render the previous item's shapes on the new image once, and record the
- * reset in the undo history.
+ * Run `reset(item, project)` whenever the queue shows an item whose `keyOf`
+ * differs from the last one (and with `undefined` while loading, on an error
+ * or when the queue is empty), so each item starts from fresh page state.
+ * The project is passed because the page has not rendered with it yet when
+ * the first item arrives.
+ *
+ * The queue calls it in the same batch as it stores the new item, so the
+ * first render of a new item already has the reset state and the reset is
+ * never recorded as an undoable edit. It deliberately does not reset during
+ * render: React 18 drops an update made during render when an earlier
+ * no-op update of the same state (a pointer move over the canvas) is still
+ * pending, and the page would then show the previous item's shapes on the
+ * new image.
  */
-export function useResetOnItem(key: string, reset: () => void) {
-  const [current, setCurrent] = useState(key);
-  if (current !== key) {
-    setCurrent(key);
-    reset();
-  }
+export function useResetOnItem(
+  queue: TaskQueue,
+  keyOf: (item: QueueItem) => string,
+  reset: (item: QueueItem | undefined, project: ProjectDetail | undefined) => void,
+) {
+  const latest = useRef({ keyOf, reset });
+  latest.current = { keyOf, reset };
+  const shownKey = useRef("");
+  queue.itemListener.current = (item, project) => {
+    const key = item ? latest.current.keyOf(item) : "";
+    if (key === shownKey.current) return;
+    shownKey.current = key;
+    latest.current.reset(item, project);
+  };
 }

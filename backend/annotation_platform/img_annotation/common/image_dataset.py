@@ -199,6 +199,9 @@ class ImageTaskStore:
     # "annotation": the sidecar is the annotations file itself;
     # "index": the annotations setting is a folder holding index.json + files.
     sidecar_label: ClassVar[str] = "annotation"
+    # Sidecar `schema` values this store reads (a task that changed its item
+    # shape keeps reading the older ones and upgrades them when it writes).
+    sidecar_schemas: ClassVar[tuple[int, ...]] = (1,)
 
     def __init__(self, project) -> None:
         self.project = project
@@ -279,7 +282,7 @@ class ImageTaskStore:
             raise TaskOperationError(f"cannot read {self.task} {noun}: {error}") from error
         if (
             not isinstance(value, dict)
-            or value.get("schema") != 1
+            or value.get("schema") not in self.sidecar_schemas
             or not isinstance(value.get("items"), dict)
             or not isinstance(value.get("history"), list)
         ):

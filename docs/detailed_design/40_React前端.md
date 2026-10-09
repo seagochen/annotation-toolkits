@@ -19,7 +19,7 @@
 
 | 目录 | 内容 |
 |---|---|
-| [`img-annotation/common/`](../../frontend/src/img-annotation/common/) | 各类工具共用：[`image-canvas/`](../../frontend/src/img-annotation/common/image-canvas/)（与任务无关的画布图元，§5）、[`workspace/`](../../frontend/src/img-annotation/common/workspace/)（工作台布局、工具栏、撤销/重做、页面级快捷键 `useHotkeys`、类别配色，§6）、`useTaskQueue`（队列循环，§4）、`ImageStrip`（图像列表）、`ItemStage`（图片/文本舞台）、`useImageSize`（预探测图片像素尺寸） |
+| [`img-annotation/common/`](../../frontend/src/img-annotation/common/) | 各类工具共用：[`image-canvas/`](../../frontend/src/img-annotation/common/image-canvas/)（与任务无关的画布图元，§5）、[`workspace/`](../../frontend/src/img-annotation/common/workspace/)（工作台布局、工具栏、撤销/重做、页面级快捷键 `useHotkeys`、类别配色，§6）、`useTaskQueue`（队列循环，§4）、`useAutoSave`（草稿自动保存，§8）、`ImageStrip`（图像列表）、`ItemStage`（图片/文本舞台）、`useImageSize`（预探测图片像素尺寸） |
 | [`img-annotation/standard/`](../../frontend/src/img-annotation/standard/) | 通用传统标注：`classification/`、`caption/`、`detection/`、`segmentation/`、`polygon/`、`text-span/`（含纯函数 `text-span.ts`），各一个 `*ReviewPage.tsx` |
 | [`img-annotation/reid/`](../../frontend/src/img-annotation/reid/) | ReID / 相似度成对审核页与项目页上的 ReID 动作面板 |
 | [`img-annotation/depth/`](../../frontend/src/img-annotation/depth/) | 深度图标注页 |
@@ -104,7 +104,8 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 | 图元 | 被谁用 | 关键点 |
 |---|---|---|
 | `geometry.ts` / `shortcuts.ts` | 全部三个画布任务 | 视口缩放/平移的纯函数，快捷键绑定与冲突检测 |
-| `box-tool.ts` | 检测 | 创建/选中/移动/8 向 handle 缩放/删除检测框的纯函数状态机 |
+| `box-tool.ts` | 检测 + 多边形 | 创建/选中/移动/8 向 handle 缩放/删除框的纯函数状态机；`createBoxes` 从已保存结果建框 |
+| `shape-eraser.ts` | 检测 + 多边形 | 关键点类型 `KeyPoint` 与 `hitTestKeyPoint`；矢量橡皮 `erasePoints`/`erasePolygons`/`eraseBoxes`（及组合 `eraseAt`）：圆内的关键点删除；圆内的多边形顶点删除、剩余顶点按原顺序围成多边形（不足 3 点则删除整个多边形）；圆碰到边框的框删除（在大框内部擦点不会误删框）。未变化的列表保持同一引用，便于页面跳过更新 |
 | `polygon-tool.ts` | 分割 + 多边形 | 顶点绘制/闭合/撤销，以及顶点编辑：`pointerDownEdit`（按下时依次尝试抓顶点、在选中多边形的边上插入顶点、选中多边形、取消选中）、`dragVertexTo`（限制在图内）、`insertVertex`、`deleteVertex`（至少保留 3 点）、`relabelPolygon`、`hitTest*`，全部是纯函数，分割页可直接复用 |
 | `raster-brush.ts` | 分割 + 深度 | `drawRaster`（把栅格画进图层）与 `useRasterBrush`（画笔指针状态机：按下盖章、拖动连线、抬起结束），两页共用同一份实现 |
 | `raster-buffer.ts` | 分割 + 深度 | 可原地绘制的 `Uint8ClampedArray` 像素缓冲区：`stampAt`/`strokeSegment`（画笔）、`fillPolygon`（多边形栅格化）、`toBase64`（提交）、`loadFromImageElement`/`toImageData`（读取已有 PNG、渲染预览） |
@@ -126,14 +127,16 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 
 | 区域 | 内容 |
 |---|---|
-| 左栏 | 顶部：返回项目、`项目名 · 任务名`（`h1` 只含任务名）、当前文件名。其下一列图标页签切换面板：**标注**（页面的 `panel`）、**快捷键**（`hotkeys` + `hints`）、**原始数据**（页面传 `rawData` 时出现，显示将要提交的 `result`）。底部固定：进度条（`已完成 / 总数`）、剩余数（`.queue-count`）与 `SubmitBar`（保存按钮、禁用原因、保存失败与重试） |
+| 左栏 | 顶部：返回项目、`项目名 · 任务名`（`h1` 只含任务名）、当前文件名。其下一列图标页签切换面板：**标注**（页面的 `panel`）、**快捷键**（`hotkeys` + `hints`）、**原始数据**（页面传 `rawData` 时出现，显示将要提交的 `result`）。底部固定：`已完成 / 总数`；手动保存的页面另有进度条、剩余数（页面传 `remaining` 时的 `.queue-count`）与 `SubmitBar`（保存按钮、禁用原因、保存失败与重试），自动保存草稿的页面（多边形）只在草稿保存失败时显示错误，"加入数据集"按钮浮在画布右下角（`stageAction`） |
 | 舞台 | 画布、图片或文本，占满剩余高度，页面本身不滚动；文本条目（`media: "text"`）由 `img-annotation/common/ItemStage.tsx` 的 `TextDocument` 显示为可在舞台内滚动的文档（保留空白与换行），`text_error` 原样显示。`ImageCanvas` 左下角是缩放条（`−` 比例 `+` 适应） |
 | 工具栏 | 画布页传 `tools`（分组的按钮：图标、名称、快捷键）与 `history`（撤销/重做）时，舞台右上角浮出竖向工具栏；`toolOptions`（画笔半径等当前工具的设置）浮在工具栏左侧 |
 | 图像列表 | 页面传 `strip` 时的最右栏：`img-annotation/common/ImageStrip.tsx`，见下 |
 
 左栏面板内的组件：`PanelSection`、`OptionList`、`Segmented`、`RangeField`；检测与多边形
-用 `AnnotationTabs` 把"类别"（带本图计数的类别图例）与"图层"（本图的框/多边形列表，
-可选中、删除）放在"标注 N"下的两个页签里。
+用 `ClassLayers` 在"标注 N"下列出类别：每个类别一行（色块、名称、本图数量、数字键）。
+选中了形状时，点击类别行 = 把该形状改为这个类别；否则 = 设为新形状的当前类别（左侧竖条）
+并高亮该类别（按下态）：画布显示该类所有多边形的顶点、框的四角，其他类别淡化；再点一次
+取消高亮，`Esc` 也会取消。
 
 **图像列表**（`ImageStrip`，ReID 之外的任务页都有）：不带 `status` 分页读取全部条目
 （每页 200，"加载更多"续读），每项一张缩略图（文本条目为文档图标）、文件名，已完成的
@@ -143,8 +146,12 @@ helper。各任务页只负责自己的标注状态、`onLoad` 时的重置与�
 条目只在结果可修改的任务（多边形，`revisable`）中可打开（`status: "annotated"`），其他
 任务里禁用。当前条目有未保存的修改（页面传 `dirty`，画布页即"有可撤销的步骤"）时，
 跳转前确认。从队列中间保存了最后一个待标注条目时，`useTaskQueue` 回到 `offset 0`
-继续。页面在条目变化时用 `useResetOnItem(item_id, reset)` 在渲染中重置自己的状态
-（而不是在 `onLoad`/提交成功后），所以从列表跳转与保存后前进走同一条路径。
+继续。页面用 `useResetOnItem(queue, keyOf, reset)` 登记自己的重置：`useTaskQueue` 每次写入
+新的队列页（读取、跳转、保存后前进，以及加载中/出错）都在同一批状态更新里调用它，`keyOf`
+（多数任务为 `item_id`，多边形再加上版本与来源）变化时才执行 `reset(item)`。所以从列表跳转与
+保存后前进走同一条路径，新条目的第一次渲染就是重置后的状态，重置也不会记入撤销历史。
+不在渲染中重置：React 18 在同一状态还挂着一个未处理的空更新（画布上拖动时指针移动产生的）
+时，会在之后重算时丢掉渲染中做的更新，页面就会退回上一张图的形状。
 
 **撤销/重做**（`useEditHistory`）：保存整份编辑状态的快照栈。检测与多边形用
 `useRecordChanges` 记录框/多边形数组每次"落定"的值（拖动中传 `null`，一次拖动算一步；
@@ -165,13 +172,13 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 
 | 页面 | 快捷键 |
 |---|---|
-| 全部（ReID 除外） | `Ctrl/⌘ + Enter` 保存并继续（描述页在输入框内也可用） |
+| 全部（ReID 除外） | `Ctrl/⌘ + Enter` 保存并继续（描述页在输入框内也可用；多边形为"加入数据集"，编辑本身自动存为草稿） |
 | 全部画布页 | `H` 拖动画布工具、`Ctrl/⌘ + Z` 撤销、`Ctrl/⌘ + Shift + Z` 或 `Ctrl/⌘ + Y` 重做 |
 | 分类 | `1`–`9` 选择/切换第 N 个标签 |
 | 文本片段 | 拖选文本新建片段（当前标签）、`1`–`9` 选择标签（选中片段时改为该标签）、`Del`/`Backspace` 删除选中片段、`Esc` 取消选中 |
-| 检测 | `1`–`9` 选择类别（选中框时改为该类别）、`V` 选择、`B` 绘制新框、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中 |
+| 检测 | `1`–`9` 选择并高亮类别（选中框时改为该类别）、`V` 选择、`B` 绘制新框、`E` 橡皮、`[`/`]` 橡皮半径、`Del`/`Backspace` 删除选中框、`Esc` 取消绘制/选中/高亮 |
 | 分割 | `1`–`9` 选择类别、`B` 画笔、`E` 橡皮、`P` 多边形、`[`/`]` 画笔半径、`Enter` 闭合多边形、`Backspace` 撤销最后一点、`Esc` 放弃多边形 |
-| 多边形 | `1`–`9` 选择类别（选中多边形时改为该类别）、`V` 选择、`P` 绘制新多边形/回到编辑、`Enter` 闭合、`Backspace` 绘制时撤销一点（编辑时同 Del）、`Del` 删除选中顶点（未选顶点时删除多边形）、`Esc` 放弃绘制/取消选中；拖动顶点移动，点击选中多边形的边插入顶点 |
+| 多边形 | `1`–`9` 选择类别并显示其顶点（选中形状时改为该类别）、`V` 选择、`P` 绘制新多边形/回到编辑、`B` 画矩形框、`K` 放置关键点、`E` 橡皮、`[`/`]` 橡皮半径、`Enter` 闭合、`Backspace` 绘制时撤销一点（编辑时同 Del）、`Del` 删除选中的关键点/框/顶点（未选顶点时删除多边形）、`Esc` 放弃绘制/取消选中与高亮；拖动顶点、框、关键点移动，点击选中多边形的边插入顶点 |
 | 深度 | `1` 提高、`2` 降低、`X` 切换方向、`[`/`]` 画笔半径 |
 | ReID | `1` 同一人、`2` 不同人、`3` 不确定（按下即提交） |
 
@@ -191,11 +198,38 @@ ReID 取 `labelled + pending`；已完成数 = 总数 − 当前队列 `total`�
 
 ## 8. 多边形标注（`img-annotation/standard/polygon/`）
 
-`PolygonReviewPage` 以队列条目的 `polygons`（已提交结果或预标）初始化
-`polygon-tool.ts` 的状态，按条目的 `item_id` + `revision` + `source` 判断是否需要
-重新初始化。提交带上条目的 `revision` 作为 `base_revision`，409 时提示并提供
-"重新载入"。`useTaskQueue` 的 `browse({ status, offset })` 让页面在"待标注"与
-"已提交"之间切换，并从图像列表打开任意一张（`status=annotated&offset=N&limit=1`），于是已提交的
-结果可以再次修改、生成新版本。浏览器加载出的图片尺寸与预标/已保存结果的尺寸不一致
-时，侧栏提示（后端会拒绝这种提交）。项目概览页把 `summary.prelabel_issues` 渲染为
+同一张图可以混合多边形、矩形框、关键点三种形状（后端契约见 `70_外部接口.md`
+polygon 小节，`polygon-json/v2` / `polygon-coco/v2`）。工具栏：选择、拖动画布 | 多边形、
+矩形框、关键点 | 橡皮。框与关键点用当前类别创建，画完仍停留在该工具以便连续标注；
+选择模式下按下时依次尝试：关键点 → 选中框的缩放 handle → 多边形顶点/选中多边形的边
+→ 框（框画在多边形之上）→ 多边形，三种形状同一时刻只选中一个，选类别会改选中形状
+的类别。橡皮半径按屏幕像素计（缩放画布不改变手感），按住拖动连续擦除，规则见
+`shape-eraser.ts`；擦除用函数式 state 更新，避免两次渲染之间的多个 pointer 事件基于
+旧状态互相覆盖。撤销/重做的快照是三个列表的组合（`useRecordChanges` 传入按列表引用
+比较的 `equals`），一次拖动或一次橡皮笔画为一步。
+
+`PolygonReviewPage` 以队列条目的 `polygons`/`boxes`/`points`（已提交结果或预标）初始化
+`polygon-tool.ts`、`box-tool.ts` 与关键点的状态，按条目的 `item_id` + `revision` + `source` 判断是否需要
+重新初始化。
+
+多边形页把**草稿**与**加入数据集**分开：
+
+- **草稿自动保存**（`img-annotation/common/useAutoSave.ts`）：结果（三个列表）每次"落定"
+  （不在拖动中）且与上次保存/载入的不同，约 0.6 秒后用 `useTaskQueue().saveDraft`
+  （`PUT /api/projects/{id}/drafts`）保存为草稿，不离开当前条目、不算完成；同一时刻只有
+  一个保存在进行，期间的修改在它完成后接着保存。未闭合的多边形不属于结果。打开别的条目前
+  `useTaskQueue` 先调用页面登记的 `leaveGuard` 把待保存的草稿存完（失败则停留）；离开页面
+  时立即提交尚在等待的保存。草稿保存失败时左栏底部显示错误与"重试"。再次打开条目时队列
+  返回草稿（`source: "draft"`），图像列表在有草稿的缩略图左上角显示橙点。
+- **加入数据集**：画布右下角（与左下角的缩放条同一高度，`TaskWorkspace` 的 `stageAction`）
+  的"加入数据集"按钮或 `Ctrl/⌘ + Enter`，先等草稿保存落定
+  （`settle()`，避免提交后又写出草稿），再以条目的 `revision` 作 `base_revision` 提交，
+  后端删除该草稿；之后同 `useTaskQueue().submit`：重新读取队列（待标注队列即下一张），
+  缩略图打勾，"已完成"按提交响应的 `total`/`pending` 更新。已提交且未改动的条目按钮显示
+  "已在数据集中"并禁用。提交失败（如 409）在按钮上方显示错误、"重试"与"重新载入"。
+
+侧栏没有"待标注/已提交"切换，已提交的条目从图像列表打开（`browse({ status: "annotated",
+offset })`，`status=annotated&offset=N&limit=1`），再次修改即生成新版本；只有待标注队列为空时，
+完成页仍提供该切换。浏览器加载出的图片尺寸与预标/已保存结果的尺寸不一致时，侧栏提示
+（后端会拒绝这种提交）。项目概览页把 `summary.prelabel_issues` 渲染为
 "未加载的预标"表格。

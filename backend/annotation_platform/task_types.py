@@ -177,6 +177,17 @@ class TaskActionModule(Protocol):
     def get_action(self, project: TaskProject, action_id: str) -> ActionRecord | None: ...
 
 
+@runtime_checkable
+class TaskDraftModule(Protocol):
+    """Optional capability: an unsubmitted working copy per item (autosave).
+
+    A draft is not a result: it does not count as done, is not exported, and
+    submitting the item replaces it.
+    """
+
+    def save_draft(self, project: TaskProject, submission: Submission) -> dict: ...
+
+
 class TaskTypeRegistry:
     """Validated collection in which exactly one module owns each type name."""
 

@@ -21,7 +21,7 @@ export function ClassificationReviewPage() {
     wrongType: "该项目不是分类任务。",
   });
   const { ready, item, submitting, submitError } = queue;
-  useResetOnItem(item ? itemText(item, "item_id") : "", () => setSelected([]));
+  useResetOnItem(queue, (shown) => itemText(shown, "item_id"), () => setSelected([]));
   const labels = useMemo(() => (ready ? summaryStrings(ready.project, "labels") : []), [ready]);
   const mode = ready ? String(ready.project.summary.mode) : "single";
 

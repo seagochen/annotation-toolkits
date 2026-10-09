@@ -1,9 +1,12 @@
-"""Editable polygon annotation with COCO prelabel import and COCO export.
+"""Editable vector annotation (polygons, boxes, keypoints) with COCO import/export.
 
 Unlike segmentation (where polygons are only a way to paint a raster), the
-polygons *are* the result here: each image gets a list of
-``{category, points}`` in original-image pixel coordinates, which stays
-editable after it is submitted.
+shapes *are* the result here: each image gets lists of polygons
+``{category, points}``, boxes ``{category, x, y, width, height}`` and
+keypoints ``{category, x, y}`` in original-image pixel coordinates, which stay
+editable after they are submitted. Boxes and keypoints were added in sidecar
+schema 2; a schema 1 sidecar (polygons only) is still read, and is rewritten
+as schema 2 the next time the project saves or exports.
 
 Prelabels (``prelabels``, optional) are a read-only standard COCO polygon file
 inside the dataset. Each dataset image whose COCO entry is entirely valid starts
@@ -52,11 +55,18 @@ from ...task_types import (
     Submission,
     TaskConflictError,
     TaskOperationError,
+    TaskProject,
     TaskStatus,
 )
 
 CONFIG_KEYS = frozenset({"dataset", "categories", "patterns", "prelabels", "annotations"})
 POLYGON_FIELDS = frozenset({"category", "points"})
+BOX_FIELDS = frozenset({"category", "x", "y", "width", "height"})
+POINT_FIELDS = frozenset({"category", "x", "y"})
+# Sidecar `schema` written by this module; 1 (polygons only) is still read.
+SIDECAR_SCHEMA = 2
+DRAFTS_SCHEMA = 1
+COCO_VERSION = 2
 COCO_IMAGE_FIELDS = frozenset({"id", "file_name", "width", "height"})
 MIN_POINTS = 3
 # The project cannot be used until its prelabel file is fixed.
@@ -143,6 +153,61 @@ def _polygons(value: object, categories: tuple[str, ...], size: dict) -> list[di
     return normalized
 
 
+def _category(value: object, categories: tuple[str, ...], kind: str) -> str:
+    if value not in categories:
+        raise TaskOperationError(f"unknown polygon {kind} category {value!r}")
+    return value
+
+
+def _boxes(value: object, categories: tuple[str, ...], size: dict) -> list[dict]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TaskOperationError("polygon result `boxes` must be a list")
+    normalized = []
+    for index, box in enumerate(value):
+        if not isinstance(box, dict) or set(box) != BOX_FIELDS:
+            raise TaskOperationError(f"box {index} must have exactly category, x, y, width and height")
+        x, y, width, height = (
+            _coordinate(box[key], f"box {index}.{key}") for key in ("x", "y", "width", "height")
+        )
+        if width <= 0 or height <= 0:
+            raise TaskOperationError(f"polygon box {index} must have positive size")
+        if x < 0 or y < 0 or x + width > size["width"] or y + height > size["height"]:
+            raise TaskOperationError(f"polygon box {index} is out of image bounds")
+        normalized.append({
+            "category": _category(box["category"], categories, "box"),
+            "x": x, "y": y, "width": width, "height": height,
+        })
+    return normalized
+
+
+def _keypoints(value: object, categories: tuple[str, ...], size: dict) -> list[dict]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TaskOperationError("polygon result `points` must be a list")
+    normalized = []
+    for index, point in enumerate(value):
+        if not isinstance(point, dict) or set(point) != POINT_FIELDS:
+            raise TaskOperationError(f"point {index} must have exactly category, x and y")
+        x = _coordinate(point["x"], f"point {index}.x")
+        y = _coordinate(point["y"], f"point {index}.y")
+        if not (0 <= x <= size["width"] and 0 <= y <= size["height"]):
+            raise TaskOperationError(f"polygon point {index} is out of image bounds")
+        normalized.append({"category": _category(point["category"], categories, "point"), "x": x, "y": y})
+    return normalized
+
+
+def _shapes(saved: dict) -> dict:
+    """The three shape lists of a stored item (schema 1 items have only polygons)."""
+    return {
+        "polygons": saved["polygons"],
+        "boxes": saved.get("boxes", []),
+        "points": saved.get("points", []),
+    }
+
+
 def _revision(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise TaskOperationError(
@@ -163,7 +228,7 @@ class PrelabelFileError(TaskOperationError):
 class Prelabels:
     """What a prelabel file contributes, per dataset item."""
 
-    # item_id -> {"image_size": {...}, "polygons": [...]} for fully valid images.
+    # item_id -> {"image_size", "polygons", "boxes", "points"} for fully valid images.
     polygons: dict[str, dict] = field(default_factory=dict)
     # item_id -> extra `images[]` fields (anything beyond id/file_name/width/height).
     extras: dict[str, dict] = field(default_factory=dict)
@@ -217,9 +282,20 @@ def _ring(value: object, size: dict) -> list[list[float]]:
     return points
 
 
-def _annotation_polygons(entry: dict, size: dict, category_names: dict[int, str],
-                         categories: tuple[str, ...]) -> list[dict]:
-    """The polygons of one valid COCO annotation; raises ValueError with a reason."""
+def _number(value: object, what: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"{what} is not a finite number")
+    return float(value)
+
+
+def _annotation_shapes(entry: dict, size: dict, category_names: dict[int, str],
+                       categories: tuple[str, ...]) -> tuple[str, list[dict]]:
+    """``(kind, shapes)`` of one valid COCO annotation; raises ValueError with a reason.
+
+    An annotation with ``keypoints`` is one keypoint, one with polygon rings is
+    one polygon per ring, and one with only a ``bbox`` (``segmentation``
+    missing or empty) is a box -- the three shapes ``coco_document`` writes.
+    """
     category_id = _coco_int(entry.get("category_id"))
     if category_id is None or category_id not in category_names:
         raise ValueError(f"category_id {entry.get('category_id')!r} is not in `categories`")
@@ -229,12 +305,32 @@ def _annotation_polygons(entry: dict, size: dict, category_names: dict[int, str]
     iscrowd = entry.get("iscrowd", 0)
     if iscrowd != 0 or isinstance(iscrowd, bool):
         raise ValueError(f"iscrowd must be 0 (got {iscrowd!r}); crowd/RLE regions are not supported")
+    if "keypoints" in entry:
+        keypoints = entry["keypoints"]
+        if not isinstance(keypoints, list) or len(keypoints) != 3:
+            raise ValueError("only single-point keypoint annotations ([x, y, v]) are supported")
+        x, y = (_number(value, "a keypoint coordinate") for value in keypoints[:2])
+        if keypoints[2] not in (1, 2) or isinstance(keypoints[2], bool):
+            raise ValueError("a keypoint must be labelled (visibility 1 or 2)")
+        if not (0 <= x <= size["width"] and 0 <= y <= size["height"]):
+            raise ValueError("a keypoint is outside the image width/height")
+        return "points", [{"category": name, "x": x, "y": y}]
     segmentation = entry.get("segmentation")
     if isinstance(segmentation, dict):
         raise ValueError("RLE segmentation is not supported; use polygon rings")
-    if not isinstance(segmentation, list) or not segmentation:
-        raise ValueError("segmentation must be a non-empty list of polygon rings")
-    return [{"category": name, "points": _ring(ring, size)} for ring in segmentation]
+    if segmentation is None or segmentation == []:
+        bbox = entry.get("bbox")
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            raise ValueError("an annotation without segmentation needs a bbox [x, y, w, h]")
+        x, y, width, height = (_number(value, "a bbox value") for value in bbox)
+        if width <= 0 or height <= 0:
+            raise ValueError("a bbox must have a positive size")
+        if x < 0 or y < 0 or x + width > size["width"] or y + height > size["height"]:
+            raise ValueError("a bbox is outside the image width/height")
+        return "boxes", [{"category": name, "x": x, "y": y, "width": width, "height": height}]
+    if not isinstance(segmentation, list):
+        raise ValueError("segmentation must be a list of polygon rings")
+    return "polygons", [{"category": name, "points": _ring(ring, size)} for ring in segmentation]
 
 
 def _read_coco(path: Path) -> dict:
@@ -316,7 +412,9 @@ def parse_prelabels(
             continue
         by_id[image_id] = (images[file_name], file_name, size)
 
-    loaded: dict[int, list[dict]] = {image_id: [] for image_id in by_id}
+    loaded: dict[int, dict[str, list[dict]]] = {
+        image_id: {"polygons": [], "boxes": [], "points": []} for image_id in by_id
+    }
     rejected: dict[int, int] = {}
     skipped: dict[int, int] = {}
     for entry in document["annotations"]:
@@ -332,7 +430,8 @@ def parse_prelabels(
             continue
         item_id, file_name, size = by_id[image_id]
         try:
-            loaded[image_id].extend(_annotation_polygons(entry, size, category_names, categories))
+            kind, shapes = _annotation_shapes(entry, size, category_names, categories)
+            loaded[image_id][kind].extend(shapes)
         except ValueError as error:
             rejected[image_id] = rejected.get(image_id, 0) + 1
             result.issues.append(_issue(
@@ -353,7 +452,7 @@ def parse_prelabels(
                 "annotation(s) are invalid; it starts blank",
                 file_name=file_name, image_id=image_id))
             continue
-        result.polygons[item_id] = {"image_size": size, "polygons": loaded[image_id]}
+        result.polygons[item_id] = {"image_size": size, **loaded[image_id]}
     return result
 
 
@@ -363,10 +462,18 @@ def parse_prelabels(
 class PolygonStore(ImageTaskStore):
     task = "polygon"
     done_key = "annotated"
+    sidecar_schemas = (1, SIDECAR_SCHEMA)
 
     def __init__(self, project) -> None:
         super().__init__(project)
         self._prelabels: Prelabels | None = None
+        # The drafts of one queue read (a store lives for one request).
+        self._drafts: dict[str, dict] | None = None
+
+    @property
+    def drafts_file(self) -> Path:
+        """Unsubmitted working copies, beside (never inside) the annotations sidecar."""
+        return self.sidecar.with_name(f"{self.sidecar.stem}.drafts.json")
 
     def excluded(self) -> tuple[Path, ...]:
         # The prelabel file is never a source image, whatever `patterns` says.
@@ -383,32 +490,108 @@ class PolygonStore(ImageTaskStore):
                 )
         return self._prelabels
 
-    def valid_item(self, saved: dict) -> bool:
-        polygons = saved.get("polygons")
-        revision = saved.get("revision")
+    @staticmethod
+    def _valid_shape_lists(saved: dict) -> bool:
+        def shapes(key: str, fields: frozenset, required: bool) -> bool:
+            value = saved.get(key, None if required else [])
+            return isinstance(value, list) and all(
+                isinstance(shape, dict) and set(shape) == fields for shape in value
+            )
+
         return (
             is_image_size(saved.get("image_size"))
-            and isinstance(revision, int)
-            and revision >= 1
-            and isinstance(polygons, list)
-            and all(isinstance(polygon, dict) and set(polygon) == POLYGON_FIELDS for polygon in polygons)
+            and shapes("polygons", POLYGON_FIELDS, True)
+            and shapes("boxes", BOX_FIELDS, False)
+            and shapes("points", POINT_FIELDS, False)
         )
+
+    def valid_item(self, saved: dict) -> bool:
+        revision = saved.get("revision")
+        return isinstance(revision, int) and revision >= 1 and self._valid_shape_lists(saved)
+
+    def _read_drafts(self) -> dict[str, dict]:
+        """The drafts file's items; a missing file has none."""
+        if not self.drafts_file.is_file():
+            return {}
+        try:
+            value = json.loads(self.drafts_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise TaskOperationError(f"cannot read polygon drafts {self.drafts_file}: {error}") from error
+        items = value.get("items") if isinstance(value, dict) and value.get("schema") == DRAFTS_SCHEMA else None
+        if not isinstance(items, dict):
+            raise TaskOperationError(f"invalid polygon drafts file {self.drafts_file}")
+        return {
+            item_id: draft
+            for item_id, draft in items.items()
+            if isinstance(draft, dict) and self._valid_shape_lists(draft)
+        }
+
+    def _write_drafts(self, drafts: dict[str, dict]) -> None:
+        try:
+            if drafts:
+                atomic_write_json(self.drafts_file, {"schema": DRAFTS_SCHEMA, "items": drafts})
+            elif self.drafts_file.is_file():
+                self.drafts_file.unlink()
+        except OSError as error:
+            raise TaskOperationError(f"cannot persist polygon drafts: {error}") from error
+
+    def _submitted_shapes(self, submission: Submission) -> tuple[int, dict, dict]:
+        """The submission's base revision, image size and validated shapes."""
+        result = submission.result
+        base_revision = _revision(result.get("base_revision"))
+        size = image_size(result.get("image_size"), "polygon")
+        shapes = {
+            "polygons": _polygons(result.get("polygons"), self.project.categories, size),
+            "boxes": _boxes(result.get("boxes"), self.project.categories, size),
+            "points": _keypoints(result.get("points"), self.project.categories, size),
+        }
+        return base_revision, size, shapes
+
+    def _check_size(self, item_id: str, current: dict | None, size: dict) -> None:
+        # A saved result, or else loaded prelabels, pin the coordinate frame of the item.
+        prelabel = self.prelabels().polygons.get(item_id)
+        expected = (
+            current["image_size"] if current is not None
+            else None if prelabel is None else prelabel["image_size"]
+        )
+        if expected is not None and expected != size:
+            raise TaskOperationError(
+                f"polygon image_size {size} does not match the image's known size {expected}"
+            )
 
     def item_view(self, item_id: str, image_path: str, saved: dict | None) -> dict:
         prelabel = self.prelabels().polygons.get(item_id)
-        if saved is not None:
-            source, size, polygons = "annotation", saved["image_size"], saved["polygons"]
+        draft = (self._drafts or {}).get(item_id)
+        if draft is not None:
+            # The working copy wins; `revision` stays the submitted one it builds on.
+            source, size, shapes = "draft", draft["image_size"], _shapes(draft)
+        elif saved is not None:
+            source, size, shapes = "annotation", saved["image_size"], _shapes(saved)
         elif prelabel is not None:
-            source, size, polygons = "prelabel", prelabel["image_size"], prelabel["polygons"]
+            source, size, shapes = "prelabel", prelabel["image_size"], _shapes(prelabel)
         else:
-            source, size, polygons = "none", None, []
+            source, size, shapes = "none", None, {"polygons": [], "boxes": [], "points": []}
         return {
             "item_id": item_id,
             "image_path": image_path,
             "revision": 0 if saved is None else saved["revision"],
             "source": source,
             "image_size": size,
-            "polygons": polygons,
+            **shapes,
+            "draft": draft is not None,
+        }
+
+    @staticmethod
+    def upgrade(state: dict) -> dict:
+        """Rewrite a schema 1 document as schema 2 (every item gets all three lists)."""
+        if state["schema"] == SIDECAR_SCHEMA:
+            return state
+        return {
+            **state,
+            "schema": SIDECAR_SCHEMA,
+            "items": {
+                item_id: {**saved, **_shapes(saved)} for item_id, saved in state["items"].items()
+            },
         }
 
     def status_fields(self) -> dict:
@@ -420,7 +603,12 @@ class PolygonStore(ImageTaskStore):
 
     def queue(self, request: QueueRequest) -> QueuePage:
         self.prelabels()  # a broken prelabel file fails the queue, not a page later
-        return super().queue(request)
+        with self.lock:
+            self._drafts = self._read_drafts()
+            try:
+                return super().queue(request)
+            finally:
+                self._drafts = None
 
     def status(self) -> TaskStatus:
         base = super().status()
@@ -437,26 +625,54 @@ class PolygonStore(ImageTaskStore):
             details["prelabel_issues"] = prelabels.issues[:MAX_REPORTED_ISSUES]
         return TaskStatus(base.state, details)
 
-    def submit(self, submission: Submission) -> dict:
-        result = submission.result
-        base_revision = _revision(result.get("base_revision"))
-        size = image_size(result.get("image_size"), "polygon")
-        polygons = _polygons(result.get("polygons"), self.project.categories, size)
-        image_path = self.image_path(submission.item_id)
-        # Loaded prelabels pin the coordinate frame their polygons were made in.
-        prelabel = self.prelabels().polygons.get(submission.item_id)
-        expected = None if prelabel is None else prelabel["image_size"]
+    def save_draft(self, submission: Submission) -> dict:
+        """Keep (autosave) the item's unsubmitted working copy.
+
+        A draft equal to what the item already starts from (its submitted
+        result, else its prelabel, else nothing) is dropped instead.
+        """
+        base_revision, size, shapes = self._submitted_shapes(submission)
+        item_id = submission.item_id
+        self.image_path(item_id)
         with self.lock:
-            state = self._read()
+            current = self.upgrade(self._read())["items"].get(item_id)
+            self._check_size(item_id, current, size)
+            prelabel = self.prelabels().polygons.get(item_id)
+            baseline = (
+                _shapes(current) if current is not None
+                else _shapes(prelabel) if prelabel is not None
+                else {"polygons": [], "boxes": [], "points": []}
+            )
+            drafts = self._read_drafts()
+            if shapes == baseline:
+                if drafts.pop(item_id, None) is not None:
+                    self._write_drafts(drafts)
+                return {"item_id": item_id, "draft": False}
+            updated_at = datetime.now(timezone.utc).isoformat()
+            drafts[item_id] = {
+                "image_size": size,
+                **shapes,
+                "base_revision": base_revision,
+                "updated_at": updated_at,
+            }
+            self._write_drafts(drafts)
+            return {"item_id": item_id, "draft": True, "updated_at": updated_at}
+
+    def _drop_draft(self, item_id: str) -> None:
+        drafts = self._read_drafts()
+        if drafts.pop(item_id, None) is not None:
+            self._write_drafts(drafts)
+
+    def submit(self, submission: Submission) -> dict:
+        base_revision, size, shapes = self._submitted_shapes(submission)
+        image_path = self.image_path(submission.item_id)
+        with self.lock:
+            state = self.upgrade(self._read())
             current = state["items"].get(submission.item_id)
-            if current is not None:
-                expected = current["image_size"]
-            if expected is not None and expected != size:
-                raise TaskOperationError(
-                    f"polygon image_size {size} does not match the image's known size {expected}"
-                )
+            self._check_size(submission.item_id, current, size)
             current_revision = 0 if current is None else current["revision"]
-            if current is not None and current["polygons"] == polygons:
+            if current is not None and _shapes(current) == shapes:
+                self._drop_draft(submission.item_id)
                 return {"item_id": submission.item_id, **current}
             if base_revision != current_revision:
                 raise TaskConflictError(
@@ -466,7 +682,7 @@ class PolygonStore(ImageTaskStore):
             saved = {
                 "image_path": image_path,
                 "image_size": size,
-                "polygons": polygons,
+                **shapes,
                 "revision": current_revision + 1,
             }
             state["items"][submission.item_id] = saved
@@ -482,13 +698,22 @@ class PolygonStore(ImageTaskStore):
                 atomic_write_json(self.project.annotations, state)
             except OSError as error:
                 raise TaskOperationError(f"cannot persist polygon result: {error}") from error
+            # Submitted: the working copy has done its job.
+            self._drop_draft(submission.item_id)
             return {"item_id": submission.item_id, **saved}
 
     def export(self, request: ExportRequest) -> ExportResult:
         with self.lock:
             state = self._read()
             if request.format in {"native", "json"}:
-                path = self.native_export(state, atomic_write_json)
+                if state["schema"] != SIDECAR_SCHEMA and self.sidecar.is_file():
+                    # The download is always the current contract: upgrade in place.
+                    state = self.upgrade(state)
+                    try:
+                        atomic_write_json(self.project.annotations, state)
+                    except OSError as error:
+                        raise TaskOperationError(f"cannot upgrade polygon JSON: {error}") from error
+                path = self.native_export(self.upgrade(state), atomic_write_json)
                 return ExportResult("polygon-json", (path,))
             if request.format != "coco":
                 raise TaskOperationError(
@@ -507,11 +732,26 @@ class PolygonStore(ImageTaskStore):
             )
 
     def coco_document(self, state: dict) -> dict:
-        """Standard COCO: one annotation per polygon, ids in a deterministic order."""
+        """Standard COCO, ids in a deterministic order.
+
+        Per image: one annotation per polygon (segmentation ring), then per box
+        (``segmentation: []``), then per keypoint (``keypoints: [x, y, 2]``,
+        every category declaring the single keypoint ``"point"``).
+        """
         extras = self.prelabels().extras if self.project.prelabels is not None else {}
         category_ids = {name: index + 1 for index, name in enumerate(self.project.categories)}
         images, annotations = [], []
         ordered = sorted(state["items"].items(), key=lambda item: item[1]["image_path"])
+
+        def add(image_id: int, category: str, **fields) -> None:
+            annotations.append({
+                "id": len(annotations) + 1,
+                "image_id": image_id,
+                "category_id": category_ids[category],
+                **fields,
+                "iscrowd": 0,
+            })
+
         for image_id, (item_id, saved) in enumerate(ordered, start=1):
             images.append(
                 {
@@ -522,25 +762,27 @@ class PolygonStore(ImageTaskStore):
                     "height": saved["image_size"]["height"],
                 }
             )
-            for polygon in saved["polygons"]:
+            shapes = _shapes(saved)
+            for polygon in shapes["polygons"]:
                 points = polygon["points"]
-                annotations.append(
-                    {
-                        "id": len(annotations) + 1,
-                        "image_id": image_id,
-                        "category_id": category_ids[polygon["category"]],
-                        "segmentation": [[coordinate for point in points for coordinate in point]],
-                        "area": shoelace_area(points),
-                        "bbox": bounding_box(points),
-                        "iscrowd": 0,
-                    }
-                )
+                add(image_id, polygon["category"],
+                    segmentation=[[coordinate for point in points for coordinate in point]],
+                    area=shoelace_area(points), bbox=bounding_box(points))
+            for box in shapes["boxes"]:
+                add(image_id, box["category"], segmentation=[],
+                    area=box["width"] * box["height"],
+                    bbox=[box["x"], box["y"], box["width"], box["height"]])
+            for point in shapes["points"]:
+                add(image_id, point["category"], segmentation=[], area=0.0,
+                    bbox=[point["x"], point["y"], 0.0, 0.0],
+                    keypoints=[point["x"], point["y"], 2], num_keypoints=1)
         return {
-            "info": coco_info("polygon-coco"),
+            "info": coco_info("polygon-coco", COCO_VERSION),
             "images": images,
             "annotations": annotations,
             "categories": [
-                {"id": category_ids[name], "name": name} for name in self.project.categories
+                {"id": category_ids[name], "name": name, "keypoints": ["point"], "skeleton": []}
+                for name in self.project.categories
             ],
         }
 
@@ -550,3 +792,8 @@ class PolygonTaskType(ImageTaskType):
     project_type = PolygonProject
     store_type = PolygonStore
     config_loader = staticmethod(load_config)
+
+    def save_draft(self, project: TaskProject, submission: Submission) -> dict:
+        store = self._store(project)
+        assert isinstance(store, PolygonStore)
+        return store.save_draft(submission)

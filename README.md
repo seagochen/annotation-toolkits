@@ -37,7 +37,7 @@ flowchart LR
 | `text_span` | 文本片段（实体/区间）标注，允许重叠与嵌套 | [`text_span_task.py`](backend/annotation_platform/img_annotation/standard/text_span_task.py) |
 | `detection` | 目标检测框标注，COCO 兼容导出 | [`detection_task.py`](backend/annotation_platform/img_annotation/standard/detection_task.py) |
 | `segmentation` | 图像分割（画笔 + 多边形），COCO 兼容导出 | [`segmentation_task.py`](backend/annotation_platform/img_annotation/standard/segmentation_task.py) |
-| `polygon` | 可编辑多边形，COCO 预标导入、按版本修订已提交结果、标准 COCO 导出 | [`polygon_task.py`](backend/annotation_platform/img_annotation/standard/polygon_task.py) |
+| `polygon` | 可编辑的多边形、矩形框、关键点（可混合），矢量橡皮，COCO 预标导入、按版本修订已提交结果、标准 COCO 导出（关键点为 COCO keypoints） | [`polygon_task.py`](backend/annotation_platform/img_annotation/standard/polygon_task.py) |
 | `depth` | 深度图画笔标注 | [`depth_task.py`](backend/annotation_platform/img_annotation/depth/depth_task.py) |
 
 > 以上任务类型均已端到端验证（单元测试 + 一次真实浏览器交互，见
@@ -113,14 +113,14 @@ python3 docker/build_and_run.py --data <dir> [--mount /abs/dataset/path ...]
 ## 导出
 
 每个项目的"导出"页按任务类型提供格式（原生 JSON、CSV、COCO 等）。每种格式都有带
-版本号的导出契约（如 `polygon-coco/v1`），下载前会按契约校验。不经浏览器时用命令行
+版本号的导出契约（如 `polygon-coco/v2`），下载前会按契约校验。不经浏览器时用命令行
 做确定性导出与校验：
 
 ```bash
 # 已 pip install -e backend；工作区取 ANNOTATION_WORKSPACE（或 --workspace）
 python -m annotation_platform.exports contracts                      # 列出全部契约
 python -m annotation_platform.exports export <project-id> --format coco --output out.json
-python -m annotation_platform.exports check polygon-coco/v1 out.json  # 校验任意来源的文件
+python -m annotation_platform.exports check polygon-coco/v2 out.json  # 校验任意来源的文件
 ```
 
 各契约的字段、坐标/编码规则与示例见

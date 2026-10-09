@@ -57,7 +57,9 @@ def main(argv: list[str] | None = None) -> int:
         for (task_type, export_format), contract in CONTRACTS.items():
             formats.setdefault(contract.id, []).append(f"{task_type}:{export_format}")
         for contract_id in sorted(BY_ID):
-            print(f"{contract_id}\t{', '.join(formats[contract_id])}\t{BY_ID[contract_id].summary}")
+            # A superseded version is no longer produced by any format; `check` still accepts it.
+            produced_by = ", ".join(formats.get(contract_id, ())) or "(legacy: check only)"
+            print(f"{contract_id}\t{produced_by}\t{BY_ID[contract_id].summary}")
         return 0
     if args.command == "check":
         try:

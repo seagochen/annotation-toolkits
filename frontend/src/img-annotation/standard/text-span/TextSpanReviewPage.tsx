@@ -69,7 +69,7 @@ export function TextSpanReviewPage() {
     },
   });
   const { ready, item, submitting, submitError } = queue;
-  useResetOnItem(item ? itemText(item, "item_id") : "", () => {
+  useResetOnItem(queue, (shown) => itemText(shown, "item_id"), () => {
     setSpans([]);
     setSelected(null);
   });

@@ -19,6 +19,8 @@ type Entry = Readonly<{
   done: boolean;
   /** The queue page that shows this item, or null when it cannot be opened. */
   target: QueueView | null;
+  /** Edits kept as a draft, not yet submitted. */
+  draft: boolean;
 }>;
 
 /**
@@ -63,6 +65,29 @@ function useItemList(projectId: string) {
 }
 
 /**
+ * Where each listed item opens: the pending queue at its offset among the
+ * unfinished items, an annotated one at its offset among the finished items
+ * (only when results stay editable), or nowhere.
+ */
+function queueTargets(
+  items: readonly QueueItem[],
+  saved: ReadonlySet<string>,
+  revisable: boolean,
+): (QueueView | null)[] {
+  let pending = 0;
+  let annotated = 0;
+  return items.map((item) => {
+    const done = item.annotated === true || saved.has(itemText(item, "item_id"));
+    if (done) {
+      annotated += 1;
+      return revisable ? { status: "annotated", offset: annotated - 1 } : null;
+    }
+    pending += 1;
+    return { status: "pending", offset: pending - 1 };
+  });
+}
+
+/**
  * Roboflow-style list of the project's images beside the canvas: a
  * thumbnail per item, a tick on finished ones, and "‹ N / M ›" to step
  * through them. Unfinished items open from the pending queue; finished ones
@@ -87,21 +112,14 @@ export function ImageStrip({
   const listRef = useRef<HTMLUListElement>(null);
 
   const entries: Entry[] = useMemo(() => {
-    let pending = 0;
-    let annotated = 0;
-    return list.items.map((item) => {
+    const targets = queueTargets(list.items, queue.savedIds, revisable);
+    return list.items.map((item, index) => {
       const id = itemText(item, "item_id");
       const done = item.annotated === true || queue.savedIds.has(id);
-      const target: QueueView | null = done
-        ? revisable
-          ? { status: "annotated", offset: annotated }
-          : null
-        : { status: "pending", offset: pending };
-      if (done) annotated += 1;
-      else pending += 1;
-      return { id, path: itemText(item, "image_path"), isText: item.media === "text", done, target };
+      const draft = queue.draftIds.get(id) ?? item.draft === true;
+      return { id, path: itemText(item, "image_path"), isText: item.media === "text", done, target: targets[index], draft };
     });
-  }, [list.items, queue.savedIds, revisable]);
+  }, [list.items, queue.draftIds, queue.savedIds, revisable]);
 
   const position = entries.findIndex((entry) => entry.id === currentId);
 
@@ -114,7 +132,10 @@ export function ImageStrip({
   function open(entry: Entry) {
     if (queue.submitting || !entry.target || entry.id === currentId) return;
     if (dirty && !window.confirm("当前图像有未保存的修改，离开后将丢失。确定切换吗？")) return;
-    void queue.browse(entry.target);
+    // Resolved after leaving: an autosaving page saves the current item first,
+    // which moves the pending offsets of the items after it.
+    const index = list.items.findIndex((item) => itemText(item, "item_id") === entry.id);
+    void queue.browse((saved) => queueTargets(list.items, saved, revisable)[index] ?? null);
   }
 
   function step(direction: 1 | -1) {
@@ -159,7 +180,7 @@ export function ImageStrip({
             <li key={entry.id}>
               <button
                 aria-current={current ? "true" : undefined}
-                aria-label={`${entry.path}${entry.done ? "（已标注）" : ""}`}
+                aria-label={`${entry.path}${entry.done ? "（已标注）" : ""}${entry.draft ? "（有草稿）" : ""}`}
                 className="image-strip-item"
                 disabled={queue.submitting || (!entry.target && !current)}
                 onClick={() => open(entry)}
@@ -176,6 +197,9 @@ export function ImageStrip({
                     <span aria-hidden="true" className="image-strip-check">
                       ✓
                     </span>
+                  )}
+                  {entry.draft && (
+                    <span aria-hidden="true" className="image-strip-draft" title="有未加入数据集的修改" />
                   )}
                 </span>
                 <span className="image-strip-name">{name}</span>

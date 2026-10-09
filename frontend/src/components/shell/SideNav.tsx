@@ -66,23 +66,18 @@ export function projectSections(projectId: string, taskType: string) {
   ];
 }
 
-/**
- * `compact` (annotation pages) shows the icon rail whatever the saved
- * preference, so the annotation workspace keeps the full width.
- */
-export function SideNav({ compact = false }: { compact?: boolean }) {
+export function SideNav() {
   const { state, startNewProject } = useProjects();
   const [location] = useLocation();
-  const [preferCollapsed, setCollapsed] = useState(readCollapsed);
-  const collapsed = preferCollapsed || compact;
+  const [collapsed, setCollapsed] = useState(readCollapsed);
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(COLLAPSE_KEY, preferCollapsed ? "1" : "0");
+      window.localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
     } catch {
       // Private mode / blocked storage: the toggle still works for this visit.
     }
-  }, [preferCollapsed]);
+  }, [collapsed]);
 
   const activeId = /^\/projects\/([^/]+)/.exec(location)?.[1];
   const projects = state.kind === "ready" ? state.projects : [];
@@ -94,16 +89,14 @@ export function SideNav({ compact = false }: { compact?: boolean }) {
           <span className="brand-mark">AT</span>
           <span className="sidenav-label">Annotation Toolkits</span>
         </Link>
-        {!compact && (
-          <button
-            aria-label={collapsed ? "展开导航" : "收起导航"}
-            className="sidenav-collapse"
-            onClick={() => setCollapsed((current) => !current)}
-            type="button"
-          >
-            <CollapseIcon collapsed={collapsed} />
-          </button>
-        )}
+        <button
+          aria-label={collapsed ? "展开导航" : "收起导航"}
+          className="sidenav-collapse"
+          onClick={() => setCollapsed((current) => !current)}
+          type="button"
+        >
+          <CollapseIcon collapsed={collapsed} />
+        </button>
       </div>
 
       <button

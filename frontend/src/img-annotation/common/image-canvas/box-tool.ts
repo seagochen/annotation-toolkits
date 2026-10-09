@@ -34,6 +34,20 @@ function createId(): string {
   return `box-${Date.now().toString(36)}-${nextId}`;
 }
 
+/** Boxes with fresh ids from stored `{category, x, y, width, height}` (saved results, prelabels). */
+export function createBoxes(
+  values: readonly Readonly<{ category: string; x: number; y: number; width: number; height: number }>[],
+): Box[] {
+  return values.map((value) => ({
+    id: createId(),
+    category: value.category,
+    x: value.x,
+    y: value.y,
+    width: value.width,
+    height: value.height,
+  }));
+}
+
 export function createBoxToolState(boxes: readonly Box[] = []): BoxToolState {
   return { boxes, selectedId: null, drag: null };
 }

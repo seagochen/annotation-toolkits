@@ -22,6 +22,7 @@ export {
   beginMoveOrResize,
   cancelDrag,
   createBoxToolState,
+  createBoxes,
   deleteBox,
   endDrag,
   hitTestBoxes,
@@ -69,3 +70,12 @@ export {
 } from "./raster-buffer";
 export type { Colorize, RasterBuffer } from "./raster-buffer";
 export { drawRaster, useRasterBrush } from "./raster-brush";
+export {
+  createKeyPoints,
+  eraseAt,
+  eraseBoxes,
+  erasePoints,
+  erasePolygons,
+  hitTestKeyPoint,
+} from "./shape-eraser";
+export type { KeyPoint, Shapes } from "./shape-eraser";
