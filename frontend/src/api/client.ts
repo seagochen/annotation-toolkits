@@ -26,6 +26,27 @@ export class ApiError extends Error {
   }
 }
 
+export async function legacyHistory(projectId: string, signal: AbortSignal): Promise<string | null> {
+  const request = new Request(new URL("/api/legacy-history/" + encodeURIComponent(projectId), apiBaseUrl),
+    { cache: "no-store", signal });
+  const reply = await globalThis.fetch(request);
+  if (reply.status === 404) return null;
+  if (!reply.ok) throw new ApiError(reply.status, "Legacy history unavailable");
+  return JSON.stringify(await reply.json(), null, 2);
+}
+
+export async function hostedRequest<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T | null> {
+  const request = new Request(new URL(path, apiBaseUrl), {
+    method: body === undefined ? "GET" : "POST", cache: "no-store", signal,
+    ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  });
+  const reply = await globalThis.fetch(request);
+  if (reply.status === 404 && body === undefined) return null;
+  const result = await reply.json();
+  if (!reply.ok) throw new ApiError(reply.status, typeof result.detail === "string" ? result.detail : "AI request failed");
+  return result as T;
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === "object" && "detail" in error) {
     const detail = error.detail;

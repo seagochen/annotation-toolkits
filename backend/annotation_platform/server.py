@@ -511,6 +511,10 @@ def _mount_frontend(application: FastAPI, dist: Path) -> None:
     if not index.is_file():
         raise ValueError(f"frontend build not found: {index}")
 
+    @application.get("/runtime-config", include_in_schema=False)
+    async def standalone_runtime():
+        return {"mode": "standalone"}
+
     @application.get("/{asset_path:path}", include_in_schema=False)
     async def frontend(asset_path: str) -> Response:
         # An unknown /api path is a client bug, not a page: keep the JSON 404

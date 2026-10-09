@@ -14,6 +14,9 @@ let itemList: () => Response;
 function routedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = input instanceof Request ? input : new Request(input, init);
   const url = new URL(request.url);
+  if (url.pathname.startsWith("/api/legacy-history/") || url.pathname.endsWith("/ai-jobs")) {
+    return Promise.resolve(response({}, 404));
+  }
   if (request.method === "GET" && url.pathname === "/api/projects") {
     return Promise.resolve(projectList());
   }
@@ -118,6 +121,7 @@ describe("project pages", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -844,6 +848,7 @@ describe("project pages", () => {
     const canvas = await screen.findByRole("application", { name: "a.jpg" });
     const classes = screen.getByRole("group", { name: "标注类别" });
     expect(within(within(classes).getByRole("button", { name: "cat" })).getByText("×1")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "适应窗口" }));
     // A drag that edits nothing still sends pointer moves, whose no-op state
     // updates React keeps pending; the next image must not fall back to these shapes.
     const pointer = (type: string, clientX: number, clientY: number) => {
