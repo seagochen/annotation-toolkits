@@ -6,6 +6,8 @@ import { summaryProgress, taskEntries } from "../../project-meta";
 import { ReIDActions } from "../../img-annotation/reid/ReIDActions";
 import { ProjectHeader, ProjectStateGate } from "./ProjectHeader";
 import { useProject } from "./useProject";
+import { LegacyHistory } from "./LegacyHistory";
+import { AiSuggestions } from "./AiSuggestions";
 
 const summaryLabels: Record<string, string> = {
   config: "配置文件",
@@ -237,6 +239,8 @@ export function ProjectOverviewPage() {
       </article>
 
       <PrelabelIssues summary={project.summary} />
+      <LegacyHistory projectId={project.id} />
+      {project.task_type === "polygon" && <AiSuggestions projectId={project.id} onApplied={() => void reload()} />}
     </div>
   );
 }

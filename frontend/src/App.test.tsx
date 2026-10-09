@@ -14,6 +14,9 @@ let itemList: () => Response;
 function routedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = input instanceof Request ? input : new Request(input, init);
   const url = new URL(request.url);
+  if (url.pathname.startsWith("/api/legacy-history/") || url.pathname.endsWith("/ai-jobs")) {
+    return Promise.resolve(response({}, 404));
+  }
   if (request.method === "GET" && url.pathname === "/api/projects") {
     return Promise.resolve(projectList());
   }

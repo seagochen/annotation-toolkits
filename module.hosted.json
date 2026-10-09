@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "kind": "service-webapp",
+  "moduleId": "annotation",
+  "version": "0.2.0",
+  "suggestedSlug": "annotation",
+  "containerPort": 8080,
+  "healthPath": "/healthz",
+  "platformApiVersion": "v1",
+  "capabilities": ["platform.auth", "platform.ai-runs"]
+}

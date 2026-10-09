@@ -1,9 +1,11 @@
-# Annotation Toolkits（本地多任务标注平台）
+# Annotation Toolkits（多任务标注工作台）
 
 面向本地数据集的多任务标注平台：一个 React 前端通过统一 HTTP API 驱动多个本地
 "项目"，标注结果原子写入本地文件系统，不依赖数据库、用户账户或云存储。项目以
 Label Studio 的项目、任务队列、标签配置和标注交互作为产品参考，但使用自己的轻量
-实现，不复制或嵌入 Label Studio 源码。
+实现，不复制或嵌入 Label Studio 源码。以上是本地 standalone 形态；独立 hosted 形态通过
+受限 REST 复用 Skills Master 账号和通用 AI，按用户隔离持久数据，自己的服务负责全部业务。
+两种启动入口明确区分，不以无认证的本地端口作为公网 hosted 服务。
 
 > 需求与设计入口见 [`docs/`](docs/README.md)：需求、总体架构与模块契约分别由对应书群维护。
 > 本 README 仅作工程总览与快速上手。
@@ -54,7 +56,7 @@ flowchart LR
 | 硬件 | 无特殊要求；ReID 的视频抽取/候选挖掘有 GPU 更快，非必需 |
 | 存储 | 全部数据、配置和标注结果保存在本地文件系统 |
 
-后端核心依赖只有 FastAPI/PyYAML/uvicorn；`backend/annotation_platform/` 运行时不
+standalone 后端核心依赖只有 FastAPI/PyYAML/uvicorn；`backend/annotation_platform/` 运行时不
 依赖 Pillow/numpy（分割/深度的 PNG 编码用标准库手写实现）。详情见
 [`docs/detailed_design/10_通用设计.md`](docs/detailed_design/10_通用设计.md) §5、§7。
 
@@ -180,7 +182,35 @@ docs/detailed_design/     # 模块契约与实现设计
 
 ## 相关说明
 
-本平台是本地单用户、局域网场景，没有身份认证、没有多用户权限——这是产品定位的
-一部分，见 [`docs/detailed_design/10_通用设计.md`](docs/detailed_design/10_通用设计.md) §3。
+standalone 是本地单用户、局域网场景；hosted 的 REST 身份与逐用户隔离独立于本地模式，见 [`docs/detailed_design/10_通用设计.md`](docs/detailed_design/10_通用设计.md) §3。
 项目路线与未完成工作以 GitHub Issues 为准；需求与设计按 [docs 文档导航](docs/README.md)
 在各自书群维护，具体数值以对应源码/配置文件为一次信息源。
+
+## Skills Master 独立 hosted 服务
+
+使用 [`Dockerfile.hosted`](Dockerfile.hosted) 与 [`module.hosted.json`](module.hosted.json)
+构建 CPU 应用服务；原 `Dockerfile` 保留本地 CUDA/ReID 形态。hosted 默认端口 8080，
+`/healthz` 不依赖登录，页面与 API 同源。公开地址采用复数
+`https://annotation.apps.skillsmaster.jp`，平台只提供账号交接和通用推理。
+
+```bash
+pip install -e 'backend[hosted]'
+export WEB_APP_DATA_DIR=/protected/annotation-data
+export WEB_APP_PUBLIC_ORIGIN=https://annotation.apps.skillsmaster.jp
+export SKILLSMASTER_API_BASE_URL=https://www.skillsmaster.jp
+export ANNOTATION_FRONTEND_DIST=./frontend/dist
+uvicorn annotation_platform.hosted:create_hosted_app --factory --app-dir backend --host 127.0.0.1 --port 8080
+```
+
+平台登记精确 callback 并授权 `platform.auth` / `platform.ai-runs` 后，浏览器通过自己的
+`/auth/platform/login` 发起 PKCE 交接，每次业务请求通过 REST 校验身份。应用没有平台
+账号库或长期 key；注销、停用、过期和平台不可用都会阻断业务请求。项目、素材、标注和
+AI 作业保存在 `users/<账号身份摘要>/`，不能通过传入账号 ID 选择其他工作区。
+
+hosted 支持 classification、captioning、text_span、detection、segmentation 与 polygon；
+ReID/depth 的本地执行与服务器路径能力不在此托管范围。托管项目只接收文件上传，不能
+关联宿主目录。polygon 项目的“AI 建议”通过 REST 提交检测，应用保存作业、原图摘要和
+原标注版本，人工接受后才写入标注；冲突不会覆盖新结果。
+
+旧平台数据转换与完整应用备份的命令、拒绝条件和回退流程见
+[部署与运维](docs/detailed_design/90_部署与运维.md#6-hosted-迁移备份与恢复)。
